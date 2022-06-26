@@ -175,6 +175,7 @@ impl Mos6502 {
                 ADC_ABS_X => (Op::ADC(AbsoluteX), 4),
                 ADC_ABS_Y => (Op::ADC(AbsoluteY), 4),
                 ADC_X_IND => (Op::ADC(XIndirect), 6),
+                ADC_IND_Y => (Op::ADC(IndirectY), 5),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -281,6 +282,23 @@ impl Mos6502 {
                                         + self.mem[addr] as usize],
                                 );
                                 self.current_instruction = None;
+                                self.pc += 1;
+                            }
+                            AddrMode::IndirectY => {
+                                let ind_addr = self.mem[self.pc as usize] as usize;
+
+                                if self.mem[ind_addr].checked_add(self.ry).is_none() {
+                                    self.current_instruction = Some((Op::NOP, 1));
+                                } else {
+                                    self.current_instruction = None;
+                                }
+
+                                self.ra = self.add_with_carry(
+                                    self.ra,
+                                    self.mem[(self.mem[ind_addr + 1] as usize).shl(8)
+                                        + self.mem[ind_addr] as usize
+                                        + self.ry as usize],
+                                );
                                 self.pc += 1;
                             }
                             addr_mode => todo!("Handling of ADC for {:?}", addr_mode),
@@ -737,6 +755,29 @@ mod test {
         cpu.rx = 0x04;
 
         for _ in 0..6 {
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x42);
+    }
+
+    #[test]
+    fn adc_indirect_y() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0x0086] = 0x28;
+        rom[0x0087] = 0x40;
+        rom[0x4038] = 0x42;
+
+        rom[0x4020] = ADC_IND_Y;
+        rom[0x4021] = 0x86;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.ry = 0x10;
+
+        for _ in 0..5 {
             cpu.cycle()
         }
 
