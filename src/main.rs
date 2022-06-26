@@ -9,6 +9,8 @@ const ADC_ZPG_X: u8 = 0x75;
 const ADC_ABS: u8 = 0x6d;
 const ADC_ABS_X: u8 = 0x7d;
 const ADC_ABS_Y: u8 = 0x79;
+const ADC_X_IND: u8 = 0x61;
+const ADC_IND_Y: u8 = 0x71;
 const NOP: u8 = 0xea;
 
 // SR Flags
@@ -172,6 +174,7 @@ impl Mos6502 {
                 ADC_ABS => (Op::ADC(Absolute), 4),
                 ADC_ABS_X => (Op::ADC(AbsoluteX), 4),
                 ADC_ABS_Y => (Op::ADC(AbsoluteY), 4),
+                ADC_X_IND => (Op::ADC(XIndirect), 6),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -269,6 +272,16 @@ impl Mos6502 {
 
                                 self.ra = self.add_with_carry(self.ra, self.mem[addr]);
                                 self.pc += 2;
+                            }
+                            AddrMode::XIndirect => {
+                                let addr = (self.mem[self.pc as usize] + self.rx) as usize;
+                                self.ra = self.add_with_carry(
+                                    self.ra,
+                                    self.mem[(self.mem[addr + 1] as usize).shl(8)
+                                        + self.mem[addr] as usize],
+                                );
+                                self.current_instruction = None;
+                                self.pc += 1;
                             }
                             addr_mode => todo!("Handling of ADC for {:?}", addr_mode),
                         }
@@ -705,5 +718,28 @@ mod test {
         assert_eq!(cpu.ra, 0x01);
         cpu.cycle();
         assert_eq!(cpu.ra, 0x02);
+    }
+
+    #[test]
+    fn adc_x_indirect() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0x0024] = 0x74;
+        rom[0x0025] = 0x20;
+        rom[0x2074] = 0x42;
+
+        rom[0x4020] = ADC_X_IND;
+        rom[0x4021] = 0x20;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.rx = 0x04;
+
+        for _ in 0..6 {
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x42);
     }
 }
