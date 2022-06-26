@@ -1,15 +1,14 @@
 // References: https://www.masswerk.at/6502/6502_instruction_set.html
 
-use std::{
-    fmt,
-    ops::Shl,
-};
+use std::{fmt, ops::Shl};
 
 // Opcodes
-const ADC_IM: u8 = 0x69;
+const ADC_IMM: u8 = 0x69;
 const ADC_ZPG: u8 = 0x65;
 const ADC_ZPG_X: u8 = 0x75;
 const ADC_ABS: u8 = 0x6d;
+const ADC_ABS_X: u8 = 0x7d;
+const ADC_ABS_Y: u8 = 0x79;
 const NOP: u8 = 0xea;
 
 // SR Flags
@@ -101,7 +100,6 @@ enum AddrMode {
     ZeropageY,
 }
 
-#[allow(dead_code)]
 struct Mos6502 {
     pc: u16, // Program counter
     ra: u8,  // Accumulator
@@ -168,10 +166,12 @@ impl Mos6502 {
             use AddrMode::*;
             self.current_instruction = Some(match self.mem[self.pc as usize] {
                 NOP => (Op::NOP, 2),
-                ADC_IM => (Op::ADC(Immediate), 2),
+                ADC_IMM => (Op::ADC(Immediate), 2),
                 ADC_ZPG => (Op::ADC(Zeropage), 3),
                 ADC_ZPG_X => (Op::ADC(ZeropageX), 4),
                 ADC_ABS => (Op::ADC(Absolute), 4),
+                ADC_ABS_X => (Op::ADC(AbsoluteX), 4),
+                ADC_ABS_Y => (Op::ADC(AbsoluteY), 4),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -181,12 +181,10 @@ impl Mos6502 {
             (op, 1) => {
                 // Last clock cycle for instruction
                 match op {
-                    Op::NOP => {}
+                    Op::NOP => self.current_instruction = None,
                     Op::ADC(addr_mode) => {
                         // Clear carry flag
-                        if self.sr & SR_C == SR_C {
-                            self.sr -= SR_C
-                        }
+                        self.sr &= !SR_C;
 
                         // Cache signs
                         let ra_sign = self.ra & SIGN;
@@ -221,6 +219,57 @@ impl Mos6502 {
                                 self.current_instruction = None;
                                 self.pc += 1;
                             }
+                            // TODO: Code duplication of AbsX and AbsY
+                            AddrMode::AbsoluteX => {
+                                // Lobyte
+                                let mut addr: usize = self
+                                    .add_with_carry(self.mem[self.pc as usize], self.rx)
+                                    as usize;
+                                // Hibyte
+                                // The carry flag is in bit zero of SR, so to conditionally inc the page
+                                // In the event that a carry occurred, we can just add (SR & C)
+                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
+                                    as usize)
+                                    .shl(8);
+
+                                // Determine if additional cycle required
+                                if self.sr & SR_C > 0 {
+                                    self.current_instruction = Some((Op::NOP, 1));
+                                } else {
+                                    self.current_instruction = None;
+                                }
+
+                                // Clear carry bit
+                                self.sr &= !SR_C;
+
+                                self.ra = self.add_with_carry(self.ra, self.mem[addr]);
+                                self.pc += 2;
+                            }
+                            AddrMode::AbsoluteY => {
+                                // Lobyte
+                                let mut addr: usize = self
+                                    .add_with_carry(self.mem[self.pc as usize], self.ry)
+                                    as usize;
+                                // Hibyte
+                                // The carry flag is in bit zero of SR, so to conditionally inc the page
+                                // In the event that a carry occurred, we can just add (SR & C)
+                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
+                                    as usize)
+                                    .shl(8);
+
+                                // Determine if additional cycle required
+                                if self.sr & SR_C > 0 {
+                                    self.current_instruction = Some((Op::NOP, 1));
+                                } else {
+                                    self.current_instruction = None;
+                                }
+
+                                // Clear carry bit
+                                self.sr &= !SR_C;
+
+                                self.ra = self.add_with_carry(self.ra, self.mem[addr]);
+                                self.pc += 2;
+                            }
                             addr_mode => todo!("Handling of ADC for {:?}", addr_mode),
                         }
                         // Check for an overflow
@@ -238,7 +287,6 @@ impl Mos6502 {
                     }
                     op => todo!("Implement handling for {op:?}"),
                 }
-                self.current_instruction = None;
             }
 
             (op, cycles) => self.current_instruction = Some((*op, cycles - 1)),
@@ -274,9 +322,9 @@ mod test {
     use crate::*;
 
     #[test]
-    fn adc_im() {
+    fn adc_imm() {
         let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = ADC_IM;
+        rom[0x0000] = ADC_IMM;
         rom[0x0001] = 0x01;
         rom[0xfffc] = 0x00;
         rom[0xfffd] = 0x00;
@@ -290,11 +338,11 @@ mod test {
     }
 
     #[test]
-    fn adc_im_twice() {
+    fn adc_imm_twice() {
         let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = ADC_IM;
+        rom[0x0000] = ADC_IMM;
         rom[0x0001] = 0x01;
-        rom[0x0002] = ADC_IM;
+        rom[0x0002] = ADC_IMM;
         rom[0x0003] = 0x01;
         rom[0xfffc] = 0x00;
         rom[0xfffd] = 0x00;
@@ -312,7 +360,7 @@ mod test {
         let mut rom = [NOP; u16::MAX as usize + 1];
 
         // Program
-        rom[0x4020] = ADC_IM;
+        rom[0x4020] = ADC_IMM;
         rom[0x4021] = 0x90;
 
         // Reset vector
@@ -444,9 +492,9 @@ mod test {
         rom[0xfffc] = 0x20;
         rom[0xfffd] = 0x40;
 
-        rom[0x4020] = ADC_IM;
+        rom[0x4020] = ADC_IMM;
         rom[0x4021] = 0x07; // 7
-        rom[0x4022] = ADC_IM;
+        rom[0x4022] = ADC_IMM;
         rom[0x4023] = 0xfe; // -2
 
         let mut cpu = Mos6502::new(rom);
@@ -524,5 +572,138 @@ mod test {
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x02);
         assert_eq!(cpu.sr, SR_C);
+    }
+
+    #[test]
+    fn adc_abs_x() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+
+        rom[0x4020] = ADC_ABS_X;
+        rom[0x4021] = 0x10;
+        rom[0x4022] = 0x01;
+
+        rom[0x0200] = 0x42;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.rx = 0xf0;
+
+        for _ in 0..5 {
+            dbg!(&cpu);
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x42);
+        assert_eq!(cpu.sr, 0x00);
+    }
+
+    #[test]
+    fn adc_abs_x_nocross() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+
+        rom[0x4020] = ADC_ABS_X;
+        rom[0x4021] = 0x10;
+        rom[0x4022] = 0x01;
+
+        rom[0x0111] = 0x42;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.rx = 0x01;
+
+        for _ in 0..4 {
+            dbg!(&cpu);
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x42);
+        assert_eq!(cpu.sr, 0x00);
+    }
+
+    #[test]
+    // Determine if AbsX takes correct number of cycles
+    fn adc_abs_x_cycle() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+
+        rom[0x4020] = ADC_ABS_X; // This should take 5 cycles as the RX offset
+        rom[0x4021] = 0x10; // Is enough to cross the page boundary
+        rom[0x4022] = 0x01;
+        rom[0x4023] = ADC_IMM;
+        rom[0x4024] = 0x01;
+
+        rom[0x0200] = 0x01;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.rx = 0xf0;
+
+        for _ in 0..6 {
+            dbg!(&cpu);
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x01);
+        cpu.cycle();
+        assert_eq!(cpu.ra, 0x02);
+    }
+
+    #[test]
+    fn adc_abs_y_nocross() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+
+        rom[0x4020] = ADC_ABS_Y;
+        rom[0x4021] = 0x10;
+        rom[0x4022] = 0x01;
+
+        rom[0x0111] = 0x42;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.ry = 0x01;
+
+        for _ in 0..4 {
+            dbg!(&cpu);
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x42);
+        assert_eq!(cpu.sr, 0x00);
+    }
+
+    #[test]
+    // Determine if AbsX takes correct number of cycles
+    fn adc_abs_y_cycle() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+
+        rom[0x4020] = ADC_ABS_Y; // This should take 5 cycles as the RX offset
+        rom[0x4021] = 0x10; // Is enough to cross the page boundary
+        rom[0x4022] = 0x01;
+        rom[0x4023] = ADC_IMM;
+        rom[0x4024] = 0x01;
+
+        rom[0x0200] = 0x01;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        cpu.ry = 0xf0;
+
+        for _ in 0..6 {
+            dbg!(&cpu);
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x01);
+        cpu.cycle();
+        assert_eq!(cpu.ra, 0x02);
     }
 }
