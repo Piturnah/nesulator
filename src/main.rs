@@ -3,6 +3,7 @@
 use std::{fmt, ops::Shl};
 
 // Opcodes
+// ADC
 const ADC_IMM: u8 = 0x69;
 const ADC_ZPG: u8 = 0x65;
 const ADC_ZPG_X: u8 = 0x75;
@@ -11,6 +12,9 @@ const ADC_ABS_X: u8 = 0x7d;
 const ADC_ABS_Y: u8 = 0x79;
 const ADC_X_IND: u8 = 0x61;
 const ADC_IND_Y: u8 = 0x71;
+// AND
+const AND_IMM: u8 = 0x29;
+const AND_ZPG: u8 = 0x25;
 const NOP: u8 = 0xea;
 
 // SR Flags
@@ -176,6 +180,7 @@ impl Mos6502 {
                 ADC_ABS_Y => (Op::ADC(AbsoluteY), 4),
                 ADC_X_IND => (Op::ADC(XIndirect), 6),
                 ADC_IND_Y => (Op::ADC(IndirectY), 5),
+                AND_IMM => (Op::AND(Immediate), 2),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -316,6 +321,14 @@ impl Mos6502 {
                             self.sr |= SR_Z;
                         }
                     }
+                    Op::AND(addr_mode) => match addr_mode {
+                        AddrMode::Immediate => {
+                            self.ra &= self.mem[self.pc as usize];
+                            self.current_instruction = None;
+                            self.pc += 1;
+                        }
+                        _ => todo!("Handling of AND for {:?}", addr_mode),
+                    },
                     op => todo!("Implement handling for {op:?}"),
                 }
             }
@@ -351,6 +364,45 @@ fn main() {
 #[cfg(test)]
 mod test {
     use crate::*;
+
+    // Alex suggested these test numbers
+    #[test]
+    fn adc_imm_alex() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+        rom[0x4020] = ADC_IMM; // 2 cycles
+        rom[0x4021] = 0x06;
+        rom[0x4022] = AND_IMM; // 2 cycles
+        rom[0x4023] = 84;
+        let mut cpu = Mos6502::new(rom);
+        for _ in 0..4 {
+            cpu.cycle()
+        }
+        assert_eq!(cpu.ra, 0x04);
+    }
+
+    #[test]
+    fn and_imm() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+        rom[0x4020] = ADC_IMM; // 2 cycles
+        rom[0x4021] = 0x01;
+        rom[0x4022] = AND_IMM; // 2 cycles
+        rom[0x4023] = 0x02;
+        let mut cpu = Mos6502::new(rom);
+
+        for _ in 0..2 {
+            cpu.cycle()
+        }
+        assert_eq!(cpu.ra, 0x01);
+
+        for _ in 0..2 {
+            cpu.cycle()
+        }
+        assert_eq!(cpu.ra, 0x00);
+    }
 
     #[test]
     fn adc_imm() {
