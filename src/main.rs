@@ -365,6 +365,49 @@ fn main() {
 mod test {
     use crate::*;
 
+    #[test]
+    fn and_zpg() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0x0042] = 84;
+
+        rom[0x4020] = ADC_IMM;
+        rom[0x4021] = 0x01;
+	rom[0x4022] = AND_ZPG; // 3 cycles
+	rom[0x4023] = 0x42;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+        let mut cpu = Mos6502::new(rom);
+
+        for _ in 0..5 {
+            cpu.cycle()
+        }
+
+        assert_eq!(cpu.ra, 0x04);
+    }
+
+    #[test]
+    fn and_zpg_srz() {
+        let mut rom = [NOP; u16::MAX as usize + 1];
+        rom[0x0000] = 0x01;
+
+        rom[0x4020] = ADC_ZPG;
+        rom[0x4021] = 0x02;
+	rom[0x4022] = AND_ZPG;
+	rom[0x4023] = 0x00;
+
+        rom[0xfffc] = 0x20;
+        rom[0xfffd] = 0x40;
+
+        let mut cpu = Mos6502::new(rom);
+        for _ in 0..5 {
+            cpu.cycle()
+        }
+
+        println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
+        assert_eq!(cpu.sr, SR_Z);
+    }
+
     // Alex suggested these test numbers
     #[test]
     fn adc_imm_alex() {
