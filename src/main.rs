@@ -2,7 +2,13 @@
 
 use std::{fmt, ops::Shl};
 
+use crossterm::terminal::ClearType;
+
 // Opcodes
+const NOP: u8 = 0xea;
+// Stack
+const PHA: u8 = 0x48;
+const PLA: u8 = 0x68;
 // ADC
 const ADC_IMM: u8 = 0x69;
 const ADC_ZPG: u8 = 0x65;
@@ -15,7 +21,10 @@ const ADC_IND_Y: u8 = 0x71;
 // AND
 const AND_IMM: u8 = 0x29;
 const AND_ZPG: u8 = 0x25;
-const NOP: u8 = 0xea;
+// LDA
+const LDA_IMM: u8 = 0xa9;
+// STA
+const STA_ZPG: u8 = 0x85;
 
 // SR Flags
 const SR_N: u8 = 0x80; // Negative
@@ -181,6 +190,10 @@ impl Mos6502 {
                 ADC_X_IND => (Op::ADC(XIndirect), 6),
                 ADC_IND_Y => (Op::ADC(IndirectY), 5),
                 AND_IMM => (Op::AND(Immediate), 2),
+                LDA_IMM => (Op::LDA(Immediate), 2),
+                PHA => (Op::PHA(Implied), 3),
+                PLA => (Op::PLA(Implied), 4),
+                STA_ZPG => (Op::STA(Zeropage), 3),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -329,12 +342,96 @@ impl Mos6502 {
                         }
                         _ => todo!("Handling of AND for {:?}", addr_mode),
                     },
+                    // TODO: Tests & SR
+                    Op::LDA(addr_mode) => match addr_mode {
+                        AddrMode::Immediate => {
+                            self.ra = self.mem[self.pc as usize];
+                            self.current_instruction = None;
+                            self.pc += 1;
+                        }
+                        _ => todo!("handling of LDA for {:?}", addr_mode),
+                    },
+                    // TODO: Tests
+                    Op::PHA(_) => {
+                        self.mem[self.sp as usize] = self.ra;
+                        self.dec_sp();
+                        self.current_instruction = None;
+                    }
+                    // TODO: Tests & SR
+                    Op::PLA(_) => {
+                        self.inc_sp();
+                        self.ra = self.mem[self.sp as usize];
+                        self.current_instruction = None;
+                    }
+                    // TODO: Tests
+                    Op::STA(addr_mode) => match addr_mode {
+                        AddrMode::Zeropage => {
+                            self.mem[self.mem[self.pc as usize] as usize] = self.ra;
+                            self.pc += 1;
+                            self.current_instruction = None;
+                        }
+                        _ => todo!("handling of STA for {:?}", addr_mode),
+                    },
                     op => todo!("Implement handling for {op:?}"),
                 }
             }
 
             (op, cycles) => self.current_instruction = Some((*op, cycles - 1)),
         }
+    }
+
+    fn dec_sp(&mut self) {
+        self.sp -= 1;
+        if self.sp < 0x0100 {
+            self.sp = 0x01ff;
+        }
+    }
+
+    fn inc_sp(&mut self) {
+        self.sp += 1;
+        if self.sp > 0x01ff {
+            self.sp = 0x0100;
+        }
+    }
+}
+
+impl fmt::Display for Mos6502 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        const WIDTH: usize = 8;
+        let mut lines: Vec<_> = self.mem.chunks(WIDTH).enumerate().collect();
+        lines.dedup_by(|(_, a), (_, b)| a == b);
+
+        let mut prev_line = 0;
+        for (i, line) in lines.iter() {
+            if *i != 0 && prev_line != i - 1 {
+                writeln!(f, " ...")?;
+            }
+            write!(f, "{:04x}: ", i * WIDTH)?;
+            for (j, b) in line.iter().enumerate() {
+                if j + i * WIDTH == self.pc as usize || j + i * WIDTH == self.sp as usize {
+                    write!(f, "{}", crossterm::style::Attribute::Reverse)?;
+                }
+                write!(f, "{:02x}{} ", b, crossterm::style::Attribute::Reset)?;
+            }
+            write!(f, " ")?;
+            for (j, b) in line.iter().enumerate() {
+                if j + i * WIDTH == self.pc as usize || j + i * WIDTH == self.sp as usize {
+                    write!(f, "{}", crossterm::style::Attribute::Reverse)?;
+                }
+                write!(
+                    f,
+                    "{}",
+                    match (*b as char).is_alphanumeric() {
+                        true => *b as char,
+                        false => '.',
+                    }
+                )?;
+                write!(f, "{}", crossterm::style::Attribute::Reset)?;
+            }
+            writeln!(f, "")?;
+            prev_line = *i;
+        }
+        write!(f, "\n ACC: {}", self.ra)
     }
 }
 
@@ -348,16 +445,38 @@ impl fmt::Debug for Mos6502 {
     }
 }
 
-fn main() {
-    // Fill ROM with NOPs
-    let rom = [NOP; u16::MAX as usize + 1];
-    let mut cpu = Mos6502::new(rom);
+fn run_cartridge(rom: [u8; u16::MAX as usize + 1 - 0x4020]) {
+    let mut mem = vec![0; u16::MAX as usize + 1];
+    mem.splice(0x4020.., rom.iter().cloned());
 
-    // CPU should start executing at 0xeaea and do NOP forever
-    // Increasing the value on the addr bus every 2 cycles
+    let mut cpu = Mos6502::new(mem.try_into().unwrap_or_else(|v: Vec<u8>| {
+        panic!("Expected Vec of length {} but it was {}", 65536, v.len())
+    }));
+
     loop {
-        println!("{:?}", cpu);
-        cpu.cycle()
+        cpu.cycle();
+        let buffer = format!("{}", cpu);
+        println!("{}{}", crossterm::terminal::Clear(ClearType::All), buffer);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+fn main() {
+    let mut args = std::env::args();
+    args.next();
+    if let Some(path) = args.next() {
+        run_cartridge(
+            std::fs::read(path)
+                .unwrap()
+                .try_into()
+                .unwrap_or_else(|v: Vec<u8>| {
+                    panic!(
+                        "Please provide a binary of size {}. Provided: {}",
+                        65536 - 0x4020,
+                        v.len()
+                    )
+                }),
+        )
     }
 }
 
@@ -372,8 +491,8 @@ mod test {
 
         rom[0x4020] = ADC_IMM;
         rom[0x4021] = 0x01;
-	rom[0x4022] = AND_ZPG; // 3 cycles
-	rom[0x4023] = 0x42;
+        rom[0x4022] = AND_ZPG; // 3 cycles
+        rom[0x4023] = 0x42;
 
         rom[0xfffc] = 0x20;
         rom[0xfffd] = 0x40;
@@ -393,8 +512,8 @@ mod test {
 
         rom[0x4020] = ADC_ZPG;
         rom[0x4021] = 0x02;
-	rom[0x4022] = AND_ZPG;
-	rom[0x4023] = 0x00;
+        rom[0x4022] = AND_ZPG;
+        rom[0x4023] = 0x00;
 
         rom[0xfffc] = 0x20;
         rom[0xfffd] = 0x40;
