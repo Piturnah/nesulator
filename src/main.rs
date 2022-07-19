@@ -397,7 +397,7 @@ impl Mos6502 {
 
 impl fmt::Display for Mos6502 {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        const WIDTH: usize = 8;
+        const WIDTH: usize = 16;
         let mut lines: Vec<_> = self.mem.chunks(WIDTH).enumerate().collect();
         lines.dedup_by(|(_, a), (_, b)| a == b);
 
@@ -477,6 +477,8 @@ fn main() {
                     )
                 }),
         )
+    } else {
+        println!("Please provide a ROM of size {}", 65536 - 0x4020);
     }
 }
 
