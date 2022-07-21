@@ -5,7 +5,7 @@ use std::{
     ops::{BitXor, Shl},
 };
 
-use crossterm::terminal::ClearType;
+use crossterm::{style::Attribute, terminal::ClearType};
 
 // Opcodes
 const NOP: u8 = 0xea;
@@ -561,14 +561,14 @@ impl fmt::Display for Mos6502 {
             write!(f, "{:04x}: ", i * WIDTH)?;
             for (j, b) in line.iter().enumerate() {
                 if j + i * WIDTH == self.pc as usize || j + i * WIDTH == self.sp as usize {
-                    write!(f, "{}", crossterm::style::Attribute::Reverse)?;
+                    write!(f, "{}", Attribute::Reverse)?;
                 }
-                write!(f, "{:02x}{} ", b, crossterm::style::Attribute::Reset)?;
+                write!(f, "{:02x}{} ", b, Attribute::Reset)?;
             }
             write!(f, " ")?;
             for (j, b) in line.iter().enumerate() {
                 if j + i * WIDTH == self.pc as usize || j + i * WIDTH == self.sp as usize {
-                    write!(f, "{}", crossterm::style::Attribute::Reverse)?;
+                    write!(f, "{}", Attribute::Reverse)?;
                 }
                 write!(
                     f,
@@ -578,7 +578,7 @@ impl fmt::Display for Mos6502 {
                         false => '.',
                     }
                 )?;
-                write!(f, "{}", crossterm::style::Attribute::Reset)?;
+                write!(f, "{}", Attribute::Reset)?;
             }
             writeln!(f, "")?;
             prev_line = *i;
