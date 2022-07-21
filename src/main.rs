@@ -225,11 +225,6 @@ impl Mos6502 {
                 match op {
                     Op::NOP => self.current_instruction = None,
                     Op::ADC(addr_mode) => {
-                        // Clear carry flag
-                        // TODO: I think this is supposed to be done with CLC rather than directly
-                        //       If easier, can probably emulate by just adding clock cycles.
-                        self.sr &= !SR_C;
-
                         match addr_mode {
                             AddrMode::Immediate => {
                                 self.ra = self.add_with_carry(self.ra, self.mem[self.pc as usize]);
@@ -392,11 +387,6 @@ impl Mos6502 {
                     },
                     // TODO: Tests
                     Op::SBC(addr_mode) => {
-                        // Set carry flag
-                        // TODO: I think this is supposed to be done with SEC rather than directly
-                        //       If easier, can probably emulate by just adding clock cycles.
-                        self.sr |= SR_C;
-
                         // Cache signs
                         let ra_sign = self.ra & SIGN;
                         let operand_sign = self.mem[self.pc as usize] & SIGN;
