@@ -32,6 +32,9 @@ const LDA_IMM: u8 = 0xa9;
 // STA
 const STA_ZPG: u8 = 0x85;
 
+const CLC: u8 = 0x18;
+const SEC: u8 = 0x38;
+
 // SR Flags
 const SR_N: u8 = 0x80; // Negative
 const SR_V: u8 = 0x40; // Overflow
@@ -214,6 +217,8 @@ impl Mos6502 {
                 PHA => (Op::PHA(Implied), 3),
                 PLA => (Op::PLA(Implied), 4),
                 STA_ZPG => (Op::STA(Zeropage), 3),
+                CLC => (Op::CLC(Implied), 2),
+                SEC => (Op::SEC(Implied), 2),
                 code => panic!("Opcode {code:#04x} currently not supported"),
             });
             self.pc += 1;
@@ -513,6 +518,14 @@ impl Mos6502 {
                         if self.ra == 0 {
                             self.sr |= SR_Z;
                         }
+                    }
+                    Op::CLC(_) => {
+                        self.sr &= !SR_C;
+                        self.current_instruction = None;
+                    }
+                    Op::SEC(_) => {
+                        self.sr |= SR_C;
+                        self.current_instruction = None;
                     }
                     op => todo!("Implement handling for {op:?}"),
                 }
