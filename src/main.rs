@@ -24,6 +24,12 @@ const SBC_ZPG: u8 = 0xe5;
 // AND
 const AND_IMM: u8 = 0x29;
 const AND_ZPG: u8 = 0x25;
+const AND_ZPG_X: u8 = 0x35;
+const AND_ABS: u8 = 0x2d;
+const AND_ABS_X: u8 = 0x3d;
+const AND_ABS_Y: u8 = 0x39;
+const AND_X_IND: u8 = 0x21;
+const AND_IND_Y: u8 = 0x31;
 // LDA
 const LDA_IMM: u8 = 0xa9;
 // STA
@@ -205,6 +211,78 @@ impl Mos6502 {
         res
     }
 
+    // TODO: self should not be mutable reference. should not use `Self::add_with_carry`.
+    fn get_operand(&mut self, addr_mode: AddrMode) -> u8 {
+        match addr_mode {
+            AddrMode::Immediate => self.mem[self.pc as usize],
+            AddrMode::Zeropage => self.mem[self.mem[self.pc as usize] as usize],
+            AddrMode::ZeropageX => self.mem[(self.mem[self.pc as usize] + self.rx) as usize],
+            AddrMode::Absolute => self.fetch(),
+            AddrMode::AbsoluteX => {
+                // Lobyte
+                let (mut addr, carry) = match self.mem[self.pc as usize].checked_add(self.rx) {
+                    Some(val) => {
+                        self.current_instruction = None;
+                        (val as usize, false)
+                    }
+                    None => {
+                        self.current_instruction = Some((Op::NOP, 1));
+                        (
+                            self.mem[self.pc as usize].wrapping_add(self.rx) as usize,
+                            true,
+                        )
+                    }
+                };
+                // Hibyte
+                // Inc page on carry
+                addr += (self.mem[self.pc as usize + 1] as usize
+                    + match carry {
+                        true => 1,
+                        false => 0,
+                    })
+                    << 8;
+
+                self.mem[addr]
+            }
+            AddrMode::AbsoluteY => {
+                // Lobyte
+                let (mut addr, carry) = match self.mem[self.pc as usize].checked_add(self.ry) {
+                    Some(val) => {
+                        self.current_instruction = None;
+                        (val as usize, false)
+                    }
+                    None => {
+                        self.current_instruction = Some((Op::NOP, 1));
+                        (
+                            self.mem[self.pc as usize].wrapping_add(self.ry) as usize,
+                            true,
+                        )
+                    }
+                };
+                // Hibyte
+                // Inc page on carry
+                addr += (self.mem[self.pc as usize + 1] as usize
+                    + match carry {
+                        true => 1,
+                        false => 0,
+                    })
+                    << 8;
+                self.mem[addr]
+            }
+            AddrMode::XIndirect => {
+                let addr = (self.mem[self.pc as usize] + self.rx) as usize;
+                self.mem[(self.mem[addr + 1] as usize).shl(8) + self.mem[addr] as usize]
+            }
+            AddrMode::IndirectY => {
+                let ind_addr = self.mem[self.pc as usize] as usize;
+                self.mem[(self.mem[ind_addr + 1] as usize).shl(8)
+                    + self.mem[ind_addr] as usize
+                    + self.ry as usize]
+            }
+            addr_mode => todo!("Handling of address mode {:?}", addr_mode),
+        }
+    }
+
     fn cycle(&mut self) {
         if self.current_instruction.is_none() {
             use AddrMode::*;
@@ -221,6 +299,13 @@ impl Mos6502 {
                 SBC_IMM => (Op::SBC(Immediate), 2),
                 SBC_ZPG => (Op::SBC(Zeropage), 3),
                 AND_IMM => (Op::AND(Immediate), 2),
+                AND_ZPG => (Op::AND(Zeropage), 3),
+                AND_ZPG_X => (Op::AND(ZeropageX), 4),
+                AND_ABS => (Op::AND(Absolute), 4),
+                AND_ABS_X => (Op::AND(AbsoluteX), 4),
+                AND_ABS_Y => (Op::AND(AbsoluteY), 4),
+                AND_X_IND => (Op::AND(XIndirect), 6),
+                AND_IND_Y => (Op::AND(IndirectY), 5),
                 LDA_IMM => (Op::LDA(Immediate), 2),
                 PHA => (Op::PHA(Implied), 3),
                 PLA => (Op::PLA(Implied), 4),
@@ -232,125 +317,22 @@ impl Mos6502 {
             self.pc += 1;
         };
 
-        match self.current_instruction.as_ref().unwrap() {
+        match self.current_instruction.unwrap() {
             (op, 1) => {
                 // Last clock cycle for instruction
                 match op {
                     Op::NOP => self.current_instruction = None,
                     Op::ADC(addr_mode) => {
+                        let operand = self.get_operand(addr_mode);
+                        self.ra = self.add_with_carry(self.ra, operand);
                         match addr_mode {
-                            AddrMode::Immediate => {
-                                self.ra = self.add_with_carry(self.ra, self.mem[self.pc as usize]);
-
+                            AddrMode::AbsoluteX | AddrMode::AbsoluteY => self.pc += 2,
+                            _ => {
                                 self.current_instruction = None;
                                 self.pc += 1;
                             }
-                            AddrMode::Zeropage => {
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    self.mem[self.mem[self.pc as usize] as usize],
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::ZeropageX => {
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    self.mem[(self.mem[self.pc as usize] + self.rx) as usize],
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::Absolute => {
-                                let operand = self.fetch();
-                                self.ra = self.add_with_carry(self.ra, operand);
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            // TODO: Code duplication of AbsX and AbsY
-                            AddrMode::AbsoluteX => {
-                                // Lobyte
-                                let mut addr: usize = self
-                                    .add_with_carry(self.mem[self.pc as usize], self.rx)
-                                    as usize;
-                                // Hibyte
-                                // The carry flag is in bit zero of SR, so to conditionally inc the page
-                                // In the event that a carry occurred, we can just add (SR & C)
-                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
-                                    as usize)
-                                    .shl(8);
-
-                                // Determine if additional cycle required
-                                if self.sr & SR_C > 0 {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                // Clear carry bit
-                                self.sr &= !SR_C;
-
-                                self.ra = self.add_with_carry(self.ra, self.mem[addr]);
-                                self.pc += 2;
-                            }
-                            AddrMode::AbsoluteY => {
-                                // Lobyte
-                                let mut addr: usize = self
-                                    .add_with_carry(self.mem[self.pc as usize], self.ry)
-                                    as usize;
-                                // Hibyte
-                                // The carry flag is in bit zero of SR, so to conditionally inc the page
-                                // In the event that a carry occurred, we can just add (SR & C)
-                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
-                                    as usize)
-                                    .shl(8);
-
-                                // Determine if additional cycle required
-                                if self.sr & SR_C > 0 {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                // Clear carry bit
-                                self.sr &= !SR_C;
-
-                                self.ra = self.add_with_carry(self.ra, self.mem[addr]);
-                                self.pc += 2;
-                            }
-                            AddrMode::XIndirect => {
-                                let addr = (self.mem[self.pc as usize] + self.rx) as usize;
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    self.mem[(self.mem[addr + 1] as usize).shl(8)
-                                        + self.mem[addr] as usize],
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::IndirectY => {
-                                let ind_addr = self.mem[self.pc as usize] as usize;
-
-                                if self.mem[ind_addr].checked_add(self.ry).is_none() {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    self.mem[(self.mem[ind_addr + 1] as usize).shl(8)
-                                        + self.mem[ind_addr] as usize
-                                        + self.ry as usize],
-                                );
-                                self.pc += 1;
-                            }
-                            addr_mode => todo!("Handling of ADC for {:?}", addr_mode),
                         }
-                        // Check for an overflow
-                        // if ra_sign == operand_sign && ra_sign != self.ra & SIGN {
-                        //     self.sr |= SR_V;
-                        // }
+
                         if self.ra & SIGN > 0 {
                             self.sr |= SR_N;
                         } else {
@@ -360,14 +342,26 @@ impl Mos6502 {
                             self.sr |= SR_Z;
                         }
                     }
-                    Op::AND(addr_mode) => match addr_mode {
-                        AddrMode::Immediate => {
-                            self.ra &= self.mem[self.pc as usize];
-                            self.current_instruction = None;
-                            self.pc += 1;
+                    Op::AND(addr_mode) => {
+                        let operand = self.get_operand(addr_mode);
+                        self.ra &= operand;
+                        match addr_mode {
+                            AddrMode::AbsoluteX | AddrMode::AbsoluteY => self.pc += 2,
+                            _ => {
+                                self.current_instruction = None;
+                                self.pc += 1;
+                            }
                         }
-                        _ => todo!("Handling of AND for {:?}", addr_mode),
-                    },
+
+                        if self.ra & SIGN > 0 {
+                            self.sr |= SR_N;
+                        } else {
+                            self.sr &= !SR_N;
+                        }
+                        if self.ra == 0 {
+                            self.sr |= SR_Z;
+                        }
+                    }
                     // TODO: Tests & SR
                     Op::LDA(addr_mode) => match addr_mode {
                         AddrMode::Immediate => {
@@ -400,125 +394,16 @@ impl Mos6502 {
                     },
                     // TODO: Tests
                     Op::SBC(addr_mode) => {
-                        // Cache signs
-                        let ra_sign = self.ra & SIGN;
-                        let operand_sign = self.mem[self.pc as usize] & SIGN;
-
+                        let operand = !self.get_operand(addr_mode);
+                        self.ra = self.add_with_carry(self.ra, operand);
                         match addr_mode {
-                            AddrMode::Immediate => {
-                                self.ra = self.add_with_carry(self.ra, !self.mem[self.pc as usize]);
-
+                            AddrMode::AbsoluteX | AddrMode::AbsoluteY => self.pc += 2,
+                            _ => {
                                 self.current_instruction = None;
                                 self.pc += 1;
                             }
-                            AddrMode::Zeropage => {
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    !self.mem[self.mem[self.pc as usize] as usize],
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::ZeropageX => {
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    !self.mem[(self.mem[self.pc as usize] + self.rx) as usize],
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::Absolute => {
-                                let operand = self.fetch();
-                                self.ra = self.add_with_carry(self.ra, !operand);
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            // TODO: Code duplication of AbsX and AbsY
-                            AddrMode::AbsoluteX => {
-                                // Lobyte
-                                let mut addr: usize = self
-                                    .add_with_carry(self.mem[self.pc as usize], self.rx)
-                                    as usize;
-                                // Hibyte
-                                // The carry flag is in bit zero of SR, so to conditionally inc the page
-                                // In the event that a carry occurred, we can just add (SR & C)
-                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
-                                    as usize)
-                                    .shl(8);
-
-                                // Determine if additional cycle required
-                                if self.sr & SR_C > 0 {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                // Clear carry bit
-                                self.sr &= !SR_C;
-
-                                self.ra = self.add_with_carry(self.ra, !self.mem[addr]);
-                                self.pc += 2;
-                            }
-                            AddrMode::AbsoluteY => {
-                                // Lobyte
-                                let mut addr: usize = self
-                                    .add_with_carry(self.mem[self.pc as usize], self.ry)
-                                    as usize;
-                                // Hibyte
-                                // The carry flag is in bit zero of SR, so to conditionally inc the page
-                                // In the event that a carry occurred, we can just add (SR & C)
-                                addr += ((self.mem[self.pc as usize + 1] + (self.sr & SR_C))
-                                    as usize)
-                                    .shl(8);
-
-                                // Determine if additional cycle required
-                                if self.sr & SR_C > 0 {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                // Clear carry bit
-                                self.sr &= !SR_C;
-
-                                self.ra = self.add_with_carry(self.ra, !self.mem[addr]);
-                                self.pc += 2;
-                            }
-                            AddrMode::XIndirect => {
-                                let addr = (self.mem[self.pc as usize] + self.rx) as usize;
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    !(self.mem[(self.mem[addr + 1] as usize).shl(8)
-                                        + self.mem[addr] as usize]
-                                        as u8),
-                                );
-                                self.current_instruction = None;
-                                self.pc += 1;
-                            }
-                            AddrMode::IndirectY => {
-                                let ind_addr = self.mem[self.pc as usize] as usize;
-
-                                if self.mem[ind_addr].checked_add(self.ry).is_none() {
-                                    self.current_instruction = Some((Op::NOP, 1));
-                                } else {
-                                    self.current_instruction = None;
-                                }
-
-                                self.ra = self.add_with_carry(
-                                    self.ra,
-                                    !(self.mem[(self.mem[ind_addr + 1] as usize).shl(8)
-                                        + self.mem[ind_addr] as usize
-                                        + self.ry as usize]
-                                        as u8),
-                                );
-                                self.pc += 1;
-                            }
-                            addr_mode => todo!("Handling of SBC for {:?}", addr_mode),
                         }
-                        // Check for an overflow
-                        if ra_sign == operand_sign && ra_sign != self.ra & SIGN {
-                            self.sr |= SR_V;
-                        }
+
                         if self.ra & SIGN > 0 {
                             self.sr |= SR_N;
                         } else {
@@ -540,7 +425,7 @@ impl Mos6502 {
                 }
             }
 
-            (op, cycles) => self.current_instruction = Some((*op, cycles - 1)),
+            (op, cycles) => self.current_instruction = Some((op, cycles - 1)),
         }
     }
 
@@ -610,6 +495,7 @@ impl fmt::Debug for Mos6502 {
     }
 }
 
+// This is for debugging or visualisation purposes
 fn run_cartridge(rom: [u8; u16::MAX as usize + 1 - 0x4020]) {
     let mut mem = vec![0; u16::MAX as usize + 1];
     mem.splice(0x4020.., rom.iter().cloned());
@@ -636,14 +522,14 @@ fn main() {
                 .try_into()
                 .unwrap_or_else(|v: Vec<u8>| {
                     panic!(
-                        "Please provide a binary of size {}. Provided: {}",
+                        "Please provide a binary of size {} bytes. Provided: {} bytes",
                         65536 - 0x4020,
                         v.len()
                     )
                 }),
         )
     } else {
-        println!("Please provide a ROM of size {}", 65536 - 0x4020);
+        println!("Please provide a ROM of size {} bytes", 65536 - 0x4020);
     }
 }
 
@@ -684,42 +570,21 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn and_zpg() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0042] = 84;
-
-        rom[0x4020] = ADC_IMM;
-        rom[0x4021] = 0x01;
-        rom[0x4022] = AND_ZPG; // 3 cycles
-        rom[0x4023] = 0x42;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_IMM, 0b01101100, AND_ZPG, 0x42];
+        cpu.mem[0x0042] = 0b10101110;
         for _ in 0..5 {
-            cpu.cycle()
+            cpu.cycle();
+            println!("{cpu}");
         }
 
-        assert_eq!(cpu.ra, 0x04);
+        assert_eq!(cpu.ra, 0b00101100);
     }
 
     #[test]
-    #[ignore]
     fn and_zpg_srz() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = 0x01;
-
-        rom[0x4020] = ADC_ZPG;
-        rom[0x4021] = 0x02;
-        rom[0x4022] = AND_ZPG;
-        rom[0x4023] = 0x00;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ZPG, 0x02, AND_ZPG, 0x00];
+        cpu.mem[0x0000] = 0x01;
         for _ in 0..5 {
             cpu.cycle()
         }
@@ -877,8 +742,7 @@ mod test {
     }
 
     #[test]
-    #[ignore]
-    fn sbc_sr_failing() {
+    fn sbc_sr_neg_result() {
         let mut cpu = program![SEC, SBC_IMM, 0x09];
         cpu.ra = 0x7;
         for _ in 0..4 {
@@ -886,19 +750,6 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0xfe);
-        assert_eq!(cpu.sr, SR_N);
-    }
-
-    #[test]
-    #[ignore]
-    fn sbc_sr_failing_2() {
-        let mut cpu = program![SEC, SBC_IMM, 0xfe];
-        cpu.ra = 0xff;
-        for _ in 0..2 {
-            cpu.cycle();
-            println!("{cpu}");
-        }
-        assert_eq!(cpu.ra, 1);
         assert_eq!(cpu.sr, SR_N);
     }
 
@@ -1059,8 +910,8 @@ mod test {
         cpu.rx = 0xf0;
 
         for _ in 0..5 {
-            dbg!(&cpu);
-            cpu.cycle()
+            cpu.cycle();
+            println!("{cpu}")
         }
 
         assert_eq!(cpu.ra, 0x42);
@@ -1108,8 +959,8 @@ mod test {
         cpu.ry = 0x01;
 
         for _ in 0..4 {
-            dbg!(&cpu);
-            cpu.cycle()
+            cpu.cycle();
+            println!("{cpu}")
         }
 
         assert_eq!(cpu.ra, 0x42);
