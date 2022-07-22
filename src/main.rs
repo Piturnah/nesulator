@@ -731,14 +731,7 @@ mod test {
     // Alex suggested these test numbers
     #[test]
     fn adc_imm_alex() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        rom[0x4020] = ADC_IMM; // 2 cycles
-        rom[0x4021] = 0x06;
-        rom[0x4022] = AND_IMM; // 2 cycles
-        rom[0x4023] = 84;
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_IMM, 0x06, AND_IMM, 84];
         for _ in 0..4 {
             cpu.cycle()
         }
@@ -747,14 +740,7 @@ mod test {
 
     #[test]
     fn and_imm() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        rom[0x4020] = ADC_IMM; // 2 cycles
-        rom[0x4021] = 0x01;
-        rom[0x4022] = AND_IMM; // 2 cycles
-        rom[0x4023] = 0x02;
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_IMM, 0x01, AND_IMM, 0x02];
 
         for _ in 0..2 {
             cpu.cycle()
@@ -769,13 +755,7 @@ mod test {
 
     #[test]
     fn adc_imm() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = ADC_IMM;
-        rom[0x0001] = 0x01;
-        rom[0xfffc] = 0x00;
-        rom[0xfffd] = 0x00;
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_IMM, 0x01];
         for _ in 0..2 {
             cpu.cycle()
         }
@@ -785,15 +765,7 @@ mod test {
 
     #[test]
     fn adc_imm_twice() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = ADC_IMM;
-        rom[0x0001] = 0x01;
-        rom[0x0002] = ADC_IMM;
-        rom[0x0003] = 0x01;
-        rom[0xfffc] = 0x00;
-        rom[0xfffd] = 0x00;
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_IMM, 0x01, ADC_IMM, 0x01];
         for _ in 0..4 {
             cpu.cycle()
         }
@@ -803,17 +775,7 @@ mod test {
 
     #[test]
     fn adc_im_carry() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        // Program
-        rom[0x4020] = ADC_IMM;
-        rom[0x4021] = 0x90;
-
-        // Reset vector
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_IMM, 0x90];
         //Initialise accumulator
         cpu.ra = 0x80;
 
@@ -828,17 +790,8 @@ mod test {
 
     #[test]
     fn sbc_zpg() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0001] = 0x42;
-
-        rom[0x4020] = SEC;
-        rom[0x4021] = SBC_ZPG;
-        rom[0x4022] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![SEC, SBC_ZPG, 0x01];
+        cpu.mem[0x0001] = 0x42;
         cpu.ra = 0x43;
 
         for _ in 0..5 {
@@ -852,16 +805,7 @@ mod test {
     #[test]
     // Values from http://forum.6502.org/viewtopic.php?t=62
     fn sbc_sr() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x401f] = SEC;
-        rom[0x4020] = SBC_IMM;
-        rom[0x4021] = 0x0a;
-
-        rom[0xfffc] = 0x1f;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![SEC, SBC_IMM, 0x0a];
 
         cpu.ra = 0xf8;
         for _ in 0..4 {
@@ -871,7 +815,7 @@ mod test {
         assert_eq!(cpu.ra, 0xee);
         assert_eq!(cpu.sr, SR_N | SR_C);
 
-        cpu.mem[0x4021] = 0x07;
+        cpu.mem[0x4022] = 0x07;
         cpu.reset();
         cpu.ra = 0x81;
         for _ in 0..4 {
@@ -883,7 +827,7 @@ mod test {
 
         cpu.reset();
         cpu.ra = 0x7;
-        cpu.mem[0x4021] = 0x2;
+        cpu.mem[0x4022] = 0x2;
         for _ in 0..4 {
             cpu.cycle();
             println!("{cpu}");
@@ -893,7 +837,7 @@ mod test {
 
         cpu.reset();
         cpu.ra = 0x7;
-        cpu.mem[0x4021] = 0xfe;
+        cpu.mem[0x4022] = 0xfe;
         for _ in 0..4 {
             cpu.cycle();
             println!("{cpu}");
@@ -903,7 +847,7 @@ mod test {
 
         cpu.reset();
         cpu.ra = 0x7;
-        cpu.mem[0x4021] = 0x90;
+        cpu.mem[0x4022] = 0x90;
         for _ in 0..4 {
             cpu.cycle();
             println!("{cpu}");
@@ -913,7 +857,7 @@ mod test {
 
         cpu.reset();
         cpu.ra = 0x10;
-        cpu.mem[0x4021] = 0x90;
+        cpu.mem[0x4022] = 0x90;
         for _ in 0..4 {
             cpu.cycle();
             println!("{cpu}");
@@ -923,7 +867,7 @@ mod test {
 
         cpu.reset();
         cpu.ra = 0x10;
-        cpu.mem[0x4021] = 0x91;
+        cpu.mem[0x4022] = 0x91;
         for _ in 0..4 {
             cpu.cycle();
             println!("{cpu}");
@@ -935,13 +879,7 @@ mod test {
     #[test]
     #[ignore]
     fn sbc_sr_failing() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x4020] = SEC;
-        rom[0x4021] = SBC_IMM;
-        rom[0x4022] = 0x9;
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![SEC, SBC_IMM, 0x09];
         cpu.ra = 0x7;
         for _ in 0..4 {
             cpu.cycle();
@@ -954,13 +892,7 @@ mod test {
     #[test]
     #[ignore]
     fn sbc_sr_failing_2() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x4020] = SEC;
-        rom[0x4021] = SBC_IMM;
-        rom[0x4022] = 0xfe;
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![SEC, SBC_IMM, 0xfe];
         cpu.ra = 0xff;
         for _ in 0..2 {
             cpu.cycle();
@@ -972,16 +904,8 @@ mod test {
 
     #[test]
     fn adc_zpg() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0001] = 0x42;
-
-        rom[0x4020] = ADC_ZPG;
-        rom[0x4021] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_ZPG, 0x01];
+        cpu.mem[0x0001] = 0x42;
         for _ in 0..3 {
             cpu.cycle()
         }
@@ -991,16 +915,8 @@ mod test {
 
     #[test]
     fn adc_zpg_srz() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0000] = 0x00;
-
-        rom[0x4020] = ADC_ZPG;
-        rom[0x4021] = 0x00;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ZPG, 0x00];
+        cpu.mem[0x0000] = 0x00;
         for _ in 0..3 {
             cpu.cycle()
         }
@@ -1011,19 +927,9 @@ mod test {
 
     #[test]
     fn adc_zpg_twice() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0001] = 0x42;
-        rom[0x0002] = 0x02;
-
-        rom[0x4020] = ADC_ZPG;
-        rom[0x4021] = 0x01;
-        rom[0x4022] = ADC_ZPG;
-        rom[0x4023] = 0x02;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_ZPG, 0x01, ADC_ZPG, 0x02];
+        cpu.mem[0x0001] = 0x42;
+        cpu.mem[0x0002] = 0x02;
         for _ in 0..6 {
             cpu.cycle()
         }
@@ -1033,16 +939,8 @@ mod test {
 
     #[test]
     fn adc_zpg_x() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0006] = 0x42;
-
-        rom[0x4020] = ADC_ZPG_X;
-        rom[0x4021] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ZPG_X, 0x01];
+        cpu.mem[0x0006] = 0x42;
         cpu.rx = 0x05;
 
         for _ in 0..4 {
@@ -1054,18 +952,8 @@ mod test {
 
     #[test]
     fn adc_abs() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0106] = 0x42;
-
-        rom[0x4020] = ADC_ABS;
-        rom[0x4021] = 0x06;
-        rom[0x4022] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
-
+        let mut cpu = program![ADC_ABS, 0x06, 0x01];
+        cpu.mem[0x0106] = 0x42;
         for _ in 0..4 {
             dbg!(&cpu);
             cpu.cycle()
@@ -1166,18 +1054,8 @@ mod test {
 
     #[test]
     fn adc_abs_x() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x4020] = ADC_ABS_X;
-        rom[0x4021] = 0x10;
-        rom[0x4022] = 0x01;
-
-        rom[0x0200] = 0x42;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ABS_X, 0x10, 0x01];
+        cpu.mem[0x0200] = 0x42;
         cpu.rx = 0xf0;
 
         for _ in 0..5 {
@@ -1191,18 +1069,8 @@ mod test {
 
     #[test]
     fn adc_abs_x_nocross() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x4020] = ADC_ABS_X;
-        rom[0x4021] = 0x10;
-        rom[0x4022] = 0x01;
-
-        rom[0x0111] = 0x42;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ABS_X, 0x10, 0x01];
+        cpu.mem[0x0111] = 0x42;
         cpu.rx = 0x01;
 
         for _ in 0..4 {
@@ -1217,20 +1085,10 @@ mod test {
     #[test]
     // Determine if AbsX takes correct number of cycles
     fn adc_abs_x_cycle() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x4020] = ADC_ABS_X; // This should take 5 cycles as the RX offset
-        rom[0x4021] = 0x10; // Is enough to cross the page boundary
-        rom[0x4022] = 0x01;
-        rom[0x4023] = ADC_IMM;
-        rom[0x4024] = 0x01;
-
-        rom[0x0200] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        // This should take 5 cycles as the RX offset is enough to cross the
+        // page boundary
+        let mut cpu = program![ADC_ABS_X, 0x10, 0x01, ADC_IMM, 0x01];
+        cpu.mem[0x0200] = 0x01;
         cpu.rx = 0xf0;
 
         for _ in 0..6 {
@@ -1245,18 +1103,8 @@ mod test {
 
     #[test]
     fn adc_abs_y_nocross() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x4020] = ADC_ABS_Y;
-        rom[0x4021] = 0x10;
-        rom[0x4022] = 0x01;
-
-        rom[0x0111] = 0x42;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_ABS_Y, 0x10, 0x01];
+        cpu.mem[0x0111] = 0x42;
         cpu.ry = 0x01;
 
         for _ in 0..4 {
@@ -1271,20 +1119,10 @@ mod test {
     #[test]
     // Determine if AbsX takes correct number of cycles
     fn adc_abs_y_cycle() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-
-        rom[0x4020] = ADC_ABS_Y; // This should take 5 cycles as the RX offset
-        rom[0x4021] = 0x10; // Is enough to cross the page boundary
-        rom[0x4022] = 0x01;
-        rom[0x4023] = ADC_IMM;
-        rom[0x4024] = 0x01;
-
-        rom[0x0200] = 0x01;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        // This should take 5 cycles as the RX offset is enough to cross the
+        // page boundary
+        let mut cpu = program![ADC_ABS_Y, 0x10, 0x01, ADC_IMM, 0x01];
+        cpu.mem[0x200] = 0x01;
         cpu.ry = 0xf0;
 
         for _ in 0..6 {
@@ -1299,18 +1137,10 @@ mod test {
 
     #[test]
     fn adc_x_indirect() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0024] = 0x74;
-        rom[0x0025] = 0x20;
-        rom[0x2074] = 0x42;
-
-        rom[0x4020] = ADC_X_IND;
-        rom[0x4021] = 0x20;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_X_IND, 0x20];
+        cpu.mem[0x0024] = 0x74;
+        cpu.mem[0x0025] = 0x20;
+        cpu.mem[0x2074] = 0x42;
         cpu.rx = 0x04;
 
         for _ in 0..6 {
@@ -1322,18 +1152,10 @@ mod test {
 
     #[test]
     fn adc_indirect_y() {
-        let mut rom = [NOP; u16::MAX as usize + 1];
-        rom[0x0086] = 0x28;
-        rom[0x0087] = 0x40;
-        rom[0x4038] = 0x42;
-
-        rom[0x4020] = ADC_IND_Y;
-        rom[0x4021] = 0x86;
-
-        rom[0xfffc] = 0x20;
-        rom[0xfffd] = 0x40;
-
-        let mut cpu = Mos6502::new(rom);
+        let mut cpu = program![ADC_IND_Y, 0x86];
+        cpu.mem[0x0086] = 0x28;
+        cpu.mem[0x0087] = 0x40;
+        cpu.mem[0x4038] = 0x42;
         cpu.ry = 0x10;
 
         for _ in 0..5 {
