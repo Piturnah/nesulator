@@ -673,7 +673,7 @@ mod test {
     #[test]
     fn add_16bit() {
         let mut cpu = program![
-            CLC, ADC_IMM, 0xff, ADC_IMM, 0x01, STA_ZPG, 0x00, LDA_IMM, 0x00, ADC_IMM, 0x7f,
+            CLC, ADC_IMM, 0xff, ADC_IMM, 0x02, STA_ZPG, 0x00, LDA_IMM, 0x00, ADC_IMM, 0x7f,
             STA_ZPG, 0x01
         ];
         for _ in 0..16 {
