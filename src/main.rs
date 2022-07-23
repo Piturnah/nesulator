@@ -4,6 +4,8 @@ use std::{fmt, ops::Shl};
 
 use crossterm::{style::Attribute, terminal::ClearType};
 
+mod parse;
+
 // Opcodes
 const NOP: u8 = 0xea;
 // Stack
