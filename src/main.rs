@@ -18,6 +18,8 @@ const ADC_ABS_X: u8 = 0x7d;
 const ADC_ABS_Y: u8 = 0x79;
 const ADC_X_IND: u8 = 0x61;
 const ADC_IND_Y: u8 = 0x71;
+// Branch
+const BNE: u8 = 0xd0;
 // SBC
 const SBC_IMM: u8 = 0xe9;
 const SBC_ZPG: u8 = 0xe5;
@@ -41,6 +43,7 @@ const CMP_X_IND: u8 = 0xc1;
 const CMP_IND_Y: u8 = 0xd1;
 // LDA
 const LDA_IMM: u8 = 0xa9;
+const LDA_ZPG: u8 = 0xa5;
 // STA
 const STA_ZPG: u8 = 0x85;
 
@@ -195,7 +198,7 @@ impl Mos6502 {
     // Add lhs and rhs, enable SR carry bit if there is carry
     //                         SR overflow bit if overflow
     fn add_with_carry(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let rhs = rhs.wrapping_add(match dbg!(self.sr & SR_C) {
+        let rhs = rhs.wrapping_add(match self.sr & SR_C {
             SR_C => 1,
             _ => 0,
         });
@@ -315,6 +318,7 @@ impl Mos6502 {
                 AND_ABS_Y => (Op::AND(AbsoluteY), 4),
                 AND_X_IND => (Op::AND(XIndirect), 6),
                 AND_IND_Y => (Op::AND(IndirectY), 5),
+                BNE => (Op::BNE(Implied), 2),
                 CMP_IMM => (Op::CMP(Immediate), 2),
                 CMP_ZPG => (Op::CMP(Zeropage), 3),
                 CMP_ZPG_X => (Op::CMP(ZeropageX), 4),
@@ -324,6 +328,7 @@ impl Mos6502 {
                 CMP_X_IND => (Op::CMP(XIndirect), 6),
                 CMP_IND_Y => (Op::CMP(IndirectY), 5),
                 LDA_IMM => (Op::LDA(Immediate), 2),
+                LDA_ZPG => (Op::LDA(Zeropage), 3),
                 PHA => (Op::PHA(Implied), 3),
                 PLA => (Op::PLA(Implied), 4),
                 STA_ZPG => (Op::STA(Zeropage), 3),
@@ -357,6 +362,8 @@ impl Mos6502 {
                         }
                         if self.ra == 0 {
                             self.sr |= SR_Z;
+                        } else {
+                            self.sr &= !SR_Z;
                         }
                     }
                     Op::AND(addr_mode) => {
@@ -377,10 +384,12 @@ impl Mos6502 {
                         }
                         if self.ra == 0 {
                             self.sr |= SR_Z;
+                        } else {
+                            self.sr &= !SR_Z;
                         }
                     }
                     Op::CMP(addr_mode) => {
-                        let operand = !self.get_operand(addr_mode) + 1;
+                        let operand = (!self.get_operand(addr_mode)).wrapping_add(1);
                         let res = match self.ra.checked_add(operand) {
                             Some(val) => {
                                 self.sr &= !SR_C;
@@ -409,15 +418,27 @@ impl Mos6502 {
                             self.sr &= !SR_Z;
                         }
                     }
-                    // TODO: Tests & SR
-                    Op::LDA(addr_mode) => match addr_mode {
-                        AddrMode::Immediate => {
-                            self.ra = self.mem[self.pc as usize];
-                            self.current_instruction = None;
-                            self.pc += 1;
+                    Op::LDA(addr_mode) => {
+                        let operand = self.get_operand(addr_mode);
+                        self.ra = operand;
+                        match addr_mode {
+                            AddrMode::AbsoluteX | AddrMode::AbsoluteY => self.pc += 2,
+                            _ => {
+                                self.current_instruction = None;
+                                self.pc += 1;
+                            }
                         }
-                        _ => todo!("handling of LDA for {:?}", addr_mode),
-                    },
+                        if self.ra & SIGN > 0 {
+                            self.sr |= SR_N;
+                        } else {
+                            self.sr &= !SR_N;
+                        }
+                        if self.ra == 0 {
+                            self.sr |= SR_Z;
+                        } else {
+                            self.sr &= !SR_Z;
+                        }
+                    }
                     // TODO: Tests
                     Op::PHA(_) => {
                         self.mem[self.sp as usize] = self.ra;
@@ -429,16 +450,37 @@ impl Mos6502 {
                         self.inc_sp();
                         self.ra = self.mem[self.sp as usize];
                         self.current_instruction = None;
+
+                        if self.ra & SIGN > 0 {
+                            self.sr |= SR_N;
+                        } else {
+                            self.sr &= !SR_N;
+                        }
+                        if self.ra == 0 {
+                            self.sr |= SR_Z;
+                        } else {
+                            self.sr &= !SR_Z;
+                        }
                     }
                     // TODO: Tests
-                    Op::STA(addr_mode) => match addr_mode {
-                        AddrMode::Zeropage => {
-                            self.mem[self.mem[self.pc as usize] as usize] = self.ra;
-                            self.pc += 1;
-                            self.current_instruction = None;
+                    Op::STA(addr_mode) => {
+                        match addr_mode {
+                            AddrMode::Zeropage => {
+                                self.mem[self.mem[self.pc as usize] as usize] = self.ra;
+                                self.pc += 1;
+                                self.current_instruction = None;
+                            }
+                            _ => todo!("handling of STA for {:?}", addr_mode),
                         }
-                        _ => todo!("handling of STA for {:?}", addr_mode),
-                    },
+                        if self.ra & SIGN > 0 {
+                            self.sr |= SR_N;
+                        } else {
+                            self.sr &= !SR_N;
+                        }
+                        if self.ra == 0 {
+                            self.sr |= SR_Z;
+                        }
+                    }
                     // TODO: Tests
                     Op::SBC(addr_mode) => {
                         let operand = !self.get_operand(addr_mode);
@@ -468,6 +510,26 @@ impl Mos6502 {
                         self.sr |= SR_C;
                         self.current_instruction = None;
                     }
+                    Op::BNE(_) => match self.sr & SR_Z {
+                        SR_Z => {
+                            self.pc += 1;
+                            self.current_instruction = None;
+                        }
+                        _ => {
+                            let current_op = self.pc - 1;
+                            let offset = self.mem[self.pc as usize] as i8;
+                            // NOTE: we are currently offsetting from the BNE instruction, rather than the
+                            //    operand. Unsure if this is correct. TODO investigate
+                            self.pc = current_op.wrapping_add(offset as u16);
+                            self.current_instruction = Some((
+                                Op::NOP,
+                                match self.pc >> 8 == current_op >> 8 {
+                                    true => 1,
+                                    false => 2,
+                                },
+                            ))
+                        }
+                    },
                     op => todo!("Implement handling for {op:?}"),
                 }
             }
@@ -555,7 +617,7 @@ fn run_cartridge(rom: [u8; u16::MAX as usize + 1 - 0x4020]) {
         cpu.cycle();
         let buffer = format!("{}", cpu);
         println!("{}{}", crossterm::terminal::Clear(ClearType::All), buffer);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -601,6 +663,28 @@ mod test {
 		)
             }))
 	}}
+    }
+
+    #[test]
+    fn bne_dont() {
+        let mut cpu = program![LDA_IMM, 5, CMP_IMM, 5, BNE, 0x10, LDA_IMM, 0x42];
+        for _ in 0..8 {
+            cpu.cycle();
+            println!("{cpu}");
+        }
+        assert_eq!(cpu.ra, 0x42);
+    }
+
+    #[test]
+    fn bne_do() {
+        let mut cpu = program![LDA_IMM, 5, CMP_IMM, 23, BNE, 0x10];
+        cpu.mem[0x4034] = LDA_IMM;
+        cpu.mem[0x4035] = 0x42;
+        for _ in 0..9 {
+            cpu.cycle();
+            println!("{cpu}");
+        }
+        assert_eq!(cpu.ra, 0x42);
     }
 
     #[test]
