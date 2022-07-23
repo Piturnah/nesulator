@@ -30,6 +30,15 @@ const AND_ABS_X: u8 = 0x3d;
 const AND_ABS_Y: u8 = 0x39;
 const AND_X_IND: u8 = 0x21;
 const AND_IND_Y: u8 = 0x31;
+//CMP
+const CMP_IMM: u8 = 0xc9;
+const CMP_ZPG: u8 = 0xc5;
+const CMP_ZPG_X: u8 = 0xd5;
+const CMP_ABS: u8 = 0xcd;
+const CMP_ABS_X: u8 = 0xdd;
+const CMP_ABS_Y: u8 = 0xd9;
+const CMP_X_IND: u8 = 0xc1;
+const CMP_IND_Y: u8 = 0xd1;
 // LDA
 const LDA_IMM: u8 = 0xa9;
 // STA
@@ -306,6 +315,14 @@ impl Mos6502 {
                 AND_ABS_Y => (Op::AND(AbsoluteY), 4),
                 AND_X_IND => (Op::AND(XIndirect), 6),
                 AND_IND_Y => (Op::AND(IndirectY), 5),
+                CMP_IMM => (Op::CMP(Immediate), 2),
+                CMP_ZPG => (Op::CMP(Zeropage), 3),
+                CMP_ZPG_X => (Op::CMP(ZeropageX), 4),
+                CMP_ABS => (Op::CMP(Absolute), 4),
+                CMP_ABS_X => (Op::CMP(AbsoluteX), 4),
+                CMP_ABS_Y => (Op::CMP(AbsoluteY), 4),
+                CMP_X_IND => (Op::CMP(XIndirect), 6),
+                CMP_IND_Y => (Op::CMP(IndirectY), 5),
                 LDA_IMM => (Op::LDA(Immediate), 2),
                 PHA => (Op::PHA(Implied), 3),
                 PLA => (Op::PLA(Implied), 4),
@@ -360,6 +377,36 @@ impl Mos6502 {
                         }
                         if self.ra == 0 {
                             self.sr |= SR_Z;
+                        }
+                    }
+                    Op::CMP(addr_mode) => {
+                        let operand = !self.get_operand(addr_mode) + 1;
+                        let res = match self.ra.checked_add(operand) {
+                            Some(val) => {
+                                self.sr &= !SR_C;
+                                val
+                            }
+                            None => {
+                                self.sr |= SR_C;
+                                self.ra.wrapping_add(operand)
+                            }
+                        };
+                        match addr_mode {
+                            AddrMode::AbsoluteX | AddrMode::AbsoluteY => self.pc += 2,
+                            _ => {
+                                self.current_instruction = None;
+                                self.pc += 1;
+                            }
+                        }
+                        if res & SIGN > 0 {
+                            self.sr |= SR_N;
+                        } else {
+                            self.sr &= !SR_N;
+                        }
+                        if res == 0 {
+                            self.sr |= SR_Z;
+                        } else {
+                            self.sr &= !SR_Z;
                         }
                     }
                     // TODO: Tests & SR
@@ -554,6 +601,42 @@ mod test {
 		)
             }))
 	}}
+    }
+
+    #[test]
+    fn cmp_imm_lt() {
+        let mut cpu = program![CMP_IMM, 5];
+        cpu.ra = 6;
+        for _ in 0..2 {
+            cpu.cycle();
+            println!("{}", cpu)
+        }
+        assert_eq!(cpu.sr, SR_C);
+        assert_eq!(cpu.ra, 6); // ACC should not change
+    }
+
+    #[test]
+    fn cmp_imm_gt() {
+        let mut cpu = program![CMP_IMM, 5];
+        cpu.ra = 4;
+        for _ in 0..2 {
+            cpu.cycle();
+            println!("{}", cpu)
+        }
+        assert_eq!(cpu.sr, SR_N);
+        assert_eq!(cpu.ra, 4); // ACC should not change
+    }
+
+    #[test]
+    fn cmp_imm_eq() {
+        let mut cpu = program![CMP_IMM, 5];
+        cpu.ra = 5;
+        for _ in 0..2 {
+            cpu.cycle();
+            println!("{}", cpu)
+        }
+        assert_eq!(cpu.sr, SR_Z | SR_C);
+        assert_eq!(cpu.ra, 5); // ACC should not change
     }
 
     #[test]
