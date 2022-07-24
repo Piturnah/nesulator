@@ -20,6 +20,12 @@ const ADC_ABS_X: u8 = 0x7d;
 const ADC_ABS_Y: u8 = 0x79;
 const ADC_X_IND: u8 = 0x61;
 const ADC_IND_Y: u8 = 0x71;
+//ASL
+const ASL_ACC: u8 = 0x0a;
+const ASL_ZPG: u8 = 0x06;
+const ASL_ZPG_X: u8 = 0x16;
+const ASL_ABS: u8 = 0x0e;
+const ASL_ABS_X: u8 = 0x1e;
 // Branch
 const BNE: u8 = 0xd0;
 // SBC
@@ -181,22 +187,6 @@ impl Mos6502 {
         self.sr = 0;
     }
 
-    // Fetch u8 from 16b address (little endian)
-    fn fetch(&self) -> u8 {
-        // lobyte
-        let mut fetch_addr: usize = self.mem[self.pc as usize] as usize;
-        // hibyte
-        fetch_addr += (self.mem[self.pc as usize + 1] as usize).shl(8);
-
-        self.mem[fetch_addr]
-    }
-
-    // Fetch u16 from 16b address (little endian)
-    fn fetch_u16(&self, addr: u16) -> u16 {
-        let addr = addr as usize;
-        self.mem[addr] as u16 + (self.mem[addr + 1] as u16).shl(8)
-    }
-
     // Add lhs and rhs, enable SR carry bit if there is carry
     //                         SR overflow bit if overflow
     fn add_with_carry(&mut self, lhs: u8, rhs: u8) -> u8 {
@@ -225,13 +215,44 @@ impl Mos6502 {
         res
     }
 
-    // TODO: self should not be mutable reference. should not use `Self::add_with_carry`.
+    fn get_operand_addr(&self, addr_mode: AddrMode) -> u16 {
+        match addr_mode {
+            AddrMode::Immediate => self.pc,
+            AddrMode::Zeropage => self.mem[self.pc as usize] as u16,
+            AddrMode::ZeropageX => self.mem[self.pc as usize].wrapping_add(self.rx) as u16,
+            AddrMode::Absolute => {
+                // lobyte
+                let fetch_addr: u16 = self.mem[self.pc as usize] as u16;
+                // hibyte
+                fetch_addr + (self.mem[self.pc as usize + 1] as u16).shl(8)
+            }
+            AddrMode::AbsoluteX => {
+                // lobyte
+                let fetch_addr: u16 = (self.mem[self.pc as usize] as u16) + self.rx as u16;
+                // hibyte
+                fetch_addr + (self.mem[self.pc as usize + 1] as u16).shl(8)
+            }
+            AddrMode::AbsoluteY => {
+                // lobyte
+                let fetch_addr: u16 = (self.mem[self.pc as usize] as u16) + self.ry as u16;
+                // hibyte
+                fetch_addr + (self.mem[self.pc as usize + 1] as u16).shl(8)
+            }
+            AddrMode::XIndirect => {
+                // NOTE: potential carry bugs here to investigate if things become weird
+                let addr = self.mem[self.pc as usize].wrapping_add(self.rx) as usize;
+                (self.mem[addr + 1] as u16).shl(8) + self.mem[addr] as u16
+            }
+            AddrMode::IndirectY => {
+                let ind_addr = self.mem[self.pc as usize] as usize;
+                (self.mem[ind_addr + 1] as u16).shl(8) + self.mem[ind_addr] as u16 + self.ry as u16
+            }
+            _ => todo!("handling of `get_operand_addr` for {:?}", addr_mode),
+        }
+    }
+
     fn get_operand(&mut self, addr_mode: AddrMode) -> u8 {
         match addr_mode {
-            AddrMode::Immediate => self.mem[self.pc as usize],
-            AddrMode::Zeropage => self.mem[self.mem[self.pc as usize] as usize],
-            AddrMode::ZeropageX => self.mem[(self.mem[self.pc as usize] + self.rx) as usize],
-            AddrMode::Absolute => self.fetch(),
             AddrMode::AbsoluteX => {
                 // Lobyte
                 let (mut addr, carry) = match self.mem[self.pc as usize].checked_add(self.rx) {
@@ -283,17 +304,7 @@ impl Mos6502 {
                     << 8;
                 self.mem[addr]
             }
-            AddrMode::XIndirect => {
-                let addr = (self.mem[self.pc as usize] + self.rx) as usize;
-                self.mem[(self.mem[addr + 1] as usize).shl(8) + self.mem[addr] as usize]
-            }
-            AddrMode::IndirectY => {
-                let ind_addr = self.mem[self.pc as usize] as usize;
-                self.mem[(self.mem[ind_addr + 1] as usize).shl(8)
-                    + self.mem[ind_addr] as usize
-                    + self.ry as usize]
-            }
-            addr_mode => todo!("Handling of address mode {:?}", addr_mode),
+            _ => self.mem[self.get_operand_addr(addr_mode) as usize],
         }
     }
 
@@ -320,6 +331,11 @@ impl Mos6502 {
                 AND_ABS_Y => (Op::AND(AbsoluteY), 4),
                 AND_X_IND => (Op::AND(XIndirect), 6),
                 AND_IND_Y => (Op::AND(IndirectY), 5),
+                ASL_ACC => (Op::ASL(Accumulator), 2),
+                ASL_ZPG => (Op::ASL(Zeropage), 5),
+                ASL_ZPG_X => (Op::ASL(ZeropageX), 6),
+                ASL_ABS => (Op::ASL(Absolute), 6),
+                ASL_ABS_X => (Op::ASL(AbsoluteX), 7),
                 BNE => (Op::BNE(Implied), 2),
                 CMP_IMM => (Op::CMP(Immediate), 2),
                 CMP_ZPG => (Op::CMP(Zeropage), 3),
@@ -390,6 +406,50 @@ impl Mos6502 {
                             self.sr &= !SR_Z;
                         }
                     }
+                    Op::ASL(addr_mode) => match addr_mode {
+                        AddrMode::Accumulator => {
+                            match self.ra >> 7 == 1 {
+                                true => self.sr |= SR_C,
+                                false => self.sr &= !SR_C,
+                            }
+
+                            self.ra = self.ra << 1;
+
+                            if self.ra & SIGN > 0 {
+                                self.sr |= SR_N;
+                            } else {
+                                self.sr &= !SR_N;
+                            }
+                            if self.ra == 0 {
+                                self.sr |= SR_Z;
+                            } else {
+                                self.sr &= !SR_Z;
+                            }
+                        }
+                        addr_mode => {
+                            let addr = self.get_operand_addr(addr_mode);
+                            let operand = self.mem[addr as usize];
+
+                            match operand >> 7 == 1 {
+                                true => self.sr |= SR_C,
+                                false => self.sr &= !SR_C,
+                            }
+
+                            self.mem[addr as usize] = operand << 1;
+                            let operand = self.mem[addr as usize];
+
+                            if operand & SIGN > 0 {
+                                self.sr |= SR_N;
+                            } else {
+                                self.sr &= !SR_N;
+                            }
+                            if operand == 0 {
+                                self.sr |= SR_Z;
+                            } else {
+                                self.sr &= !SR_Z;
+                            }
+                        }
+                    },
                     Op::CMP(addr_mode) => {
                         let operand = (!self.get_operand(addr_mode)).wrapping_add(1);
                         let res = match self.ra.checked_add(operand) {
@@ -591,7 +651,7 @@ impl fmt::Display for Mos6502 {
             writeln!(f, "")?;
             prev_line = *i;
         }
-        writeln!(f, "\n ACC: {0:#04x} ({0})", self.ra)?;
+        writeln!(f, "\n ACC: {0:#04x} ({0:03})", self.ra)?;
         write!(f, "  SR: {:#010b}", self.sr)
     }
 }
@@ -648,6 +708,12 @@ fn main() {
 mod test {
     use crate::*;
 
+    // Fetch u16 from 16b address (little endian)
+    fn fetch_u16(cpu: &Mos6502, addr: u16) -> u16 {
+        let addr = addr as usize;
+        cpu.mem[addr] as u16 + (cpu.mem[addr + 1] as u16).shl(8)
+    }
+
     macro_rules! program {
 	($($e:expr),*) => {{
 	    let mut rom = vec![0; 0x4020];
@@ -665,6 +731,68 @@ mod test {
 		)
             }))
 	}}
+    }
+
+    #[test]
+    fn asl_abs_x() {
+        let mut cpu = program![ASL_ABS_X, 0xff, 0x00];
+        cpu.mem[0x0101] = 0b10010101;
+        cpu.rx = 0x02;
+        for _ in 0..7 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.mem[0x0101], 0b00101010, "wrong value in mem");
+        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+    }
+
+    #[test]
+    fn asl_abs() {
+        let mut cpu = program![ASL_ABS, 0x1f, 0x40];
+        cpu.mem[0x401f] = 0b10010101;
+        for _ in 0..6 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.mem[0x401f], 0b00101010, "wrong value in mem");
+        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+    }
+
+    #[test]
+    fn asl_zpg_x() {
+        let mut cpu = program![ASL_ZPG_X, 0xff];
+        cpu.mem[0x01] = 0b10010101;
+        cpu.rx = 0x02;
+        for _ in 0..6 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.mem[0x01], 0b00101010, "wrong value in mem");
+        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+    }
+
+    #[test]
+    fn asl_zpg() {
+        let mut cpu = program![ASL_ZPG, 0x00];
+        cpu.mem[0] = 0b10010101;
+        for _ in 0..5 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.mem[0], 0b00101010, "wrong value in mem");
+        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+    }
+
+    #[test]
+    fn asl_acc() {
+        let mut cpu = program![LDA_IMM, 0b10010101, ASL_ACC];
+        for _ in 0..4 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.ra, 0b00101010, "wrong value in acc");
+        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+        let mut cpu = program![LDA_IMM, 0b00010101, ASL_ACC];
+        for _ in 0..4 {
+            cpu.cycle();
+        }
+        assert_eq!(cpu.ra, 0b00101010, "wrong value in acc");
+        assert_eq!(cpu.sr, 0, "wrong SR flags");
     }
 
     #[test]
@@ -735,7 +863,7 @@ mod test {
             cpu.cycle();
             println!("{}", cpu)
         }
-        assert_eq!(cpu.fetch_u16(0), 0x8001u16);
+        assert_eq!(fetch_u16(&cpu, 0), 0x8001u16);
     }
 
     #[test]
