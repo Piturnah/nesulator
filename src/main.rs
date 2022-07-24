@@ -1,5 +1,8 @@
 // References: https://www.masswerk.at/6502/6502_instruction_set.html
 
+// TODO
+// - Refactor out SR_N and SR_Z checks
+
 use std::{fmt, ops::Shl};
 
 use crossterm::{style::Attribute, terminal::ClearType};
