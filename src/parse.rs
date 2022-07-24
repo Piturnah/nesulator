@@ -13,12 +13,14 @@ impl<'a> fmt::Debug for ROM<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         const WIDTH: usize = 16;
         let lines: Vec<_> = self.prg.chunks(WIDTH).enumerate().collect();
-        for (i, line) in lines {
+        for (i, line) in &lines {
             write!(f, "{i:04x}: ")?;
             for byte in line.iter() {
                 write!(f, "{byte:02x} ")?;
             }
-            writeln!(f, "")?;
+            if *i != lines.len() {
+                writeln!(f, "")?;
+            }
         }
         Ok(())
     }
