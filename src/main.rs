@@ -1,74 +1,13 @@
-// References: https://www.masswerk.at/6502/6502_instruction_set.html
-
 // TODO
-// - Refactor out SR_N and SR_Z checks
+// - Refactor out SR::N and SR::Z checks
 
 use std::{fmt, ops::Shl};
+
+use m6502::{opcodes::*, SR};
 
 use crossterm::{style::Attribute, terminal::ClearType};
 
 mod parse;
-
-// Opcodes
-const NOP: u8 = 0xea;
-// Stack
-const PHA: u8 = 0x48;
-const PLA: u8 = 0x68;
-// ADC
-const ADC_IMM: u8 = 0x69;
-const ADC_ZPG: u8 = 0x65;
-const ADC_ZPG_X: u8 = 0x75;
-const ADC_ABS: u8 = 0x6d;
-const ADC_ABS_X: u8 = 0x7d;
-const ADC_ABS_Y: u8 = 0x79;
-const ADC_X_IND: u8 = 0x61;
-const ADC_IND_Y: u8 = 0x71;
-//ASL
-const ASL_ACC: u8 = 0x0a;
-const ASL_ZPG: u8 = 0x06;
-const ASL_ZPG_X: u8 = 0x16;
-const ASL_ABS: u8 = 0x0e;
-const ASL_ABS_X: u8 = 0x1e;
-// Branch
-const BNE: u8 = 0xd0;
-// SBC
-const SBC_IMM: u8 = 0xe9;
-const SBC_ZPG: u8 = 0xe5;
-// AND
-const AND_IMM: u8 = 0x29;
-const AND_ZPG: u8 = 0x25;
-const AND_ZPG_X: u8 = 0x35;
-const AND_ABS: u8 = 0x2d;
-const AND_ABS_X: u8 = 0x3d;
-const AND_ABS_Y: u8 = 0x39;
-const AND_X_IND: u8 = 0x21;
-const AND_IND_Y: u8 = 0x31;
-//CMP
-const CMP_IMM: u8 = 0xc9;
-const CMP_ZPG: u8 = 0xc5;
-const CMP_ZPG_X: u8 = 0xd5;
-const CMP_ABS: u8 = 0xcd;
-const CMP_ABS_X: u8 = 0xdd;
-const CMP_ABS_Y: u8 = 0xd9;
-const CMP_X_IND: u8 = 0xc1;
-const CMP_IND_Y: u8 = 0xd1;
-// LDA
-const LDA_IMM: u8 = 0xa9;
-const LDA_ZPG: u8 = 0xa5;
-// STA
-const STA_ZPG: u8 = 0x85;
-
-const CLC: u8 = 0x18;
-const SEC: u8 = 0x38;
-
-// SR Flags
-const SR_N: u8 = 0x80; // Negative
-const SR_V: u8 = 0x40; // Overflow
-const SR_B: u8 = 0x10; // Break*
-const SR_D: u8 = 0x08; // Decimal
-const SR_I: u8 = 0x04; // Interrupt
-const SR_Z: u8 = 0x02; // Zero
-const SR_C: u8 = 0x01; // Carry
 
 const SIGN: u8 = 0x80;
 
@@ -193,25 +132,25 @@ impl Mos6502 {
     // Add lhs and rhs, enable SR carry bit if there is carry
     //                         SR overflow bit if overflow
     fn add_with_carry(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let rhs = rhs.wrapping_add(match self.sr & SR_C {
-            SR_C => 1,
+        let rhs = rhs.wrapping_add(match self.sr & SR::C {
+            SR::C => 1,
             _ => 0,
         });
 
         let res = match lhs.checked_add(rhs) {
             Some(val) => {
-                self.sr &= !SR_C;
+                self.sr &= !SR::C;
                 val
             }
             None => {
-                self.sr |= SR_C;
+                self.sr |= SR::C;
                 lhs.wrapping_add(rhs)
             }
         };
 
         let carry_out_6 = (lhs << 1).checked_add(rhs << 1).is_none();
-        self.sr |= match carry_out_6 ^ (self.sr & SR_C > 0) {
-            true => SR_V,
+        self.sr |= match carry_out_6 ^ (self.sr & SR::C > 0) {
+            true => SR::V,
             false => 0,
         };
 
@@ -316,43 +255,43 @@ impl Mos6502 {
             use AddrMode::*;
             self.current_instruction = Some(match self.mem[self.pc as usize] {
                 NOP => (Op::NOP, 2),
-                ADC_IMM => (Op::ADC(Immediate), 2),
-                ADC_ZPG => (Op::ADC(Zeropage), 3),
-                ADC_ZPG_X => (Op::ADC(ZeropageX), 4),
-                ADC_ABS => (Op::ADC(Absolute), 4),
-                ADC_ABS_X => (Op::ADC(AbsoluteX), 4),
-                ADC_ABS_Y => (Op::ADC(AbsoluteY), 4),
-                ADC_X_IND => (Op::ADC(XIndirect), 6),
-                ADC_IND_Y => (Op::ADC(IndirectY), 5),
+                ADC::IMM => (Op::ADC(Immediate), 2),
+                ADC::ZPG => (Op::ADC(Zeropage), 3),
+                ADC::ZPG_X => (Op::ADC(ZeropageX), 4),
+                ADC::ABS => (Op::ADC(Absolute), 4),
+                ADC::ABS_X => (Op::ADC(AbsoluteX), 4),
+                ADC::ABS_Y => (Op::ADC(AbsoluteY), 4),
+                ADC::X_IND => (Op::ADC(XIndirect), 6),
+                ADC::IND_Y => (Op::ADC(IndirectY), 5),
                 SBC_IMM => (Op::SBC(Immediate), 2),
                 SBC_ZPG => (Op::SBC(Zeropage), 3),
-                AND_IMM => (Op::AND(Immediate), 2),
-                AND_ZPG => (Op::AND(Zeropage), 3),
-                AND_ZPG_X => (Op::AND(ZeropageX), 4),
-                AND_ABS => (Op::AND(Absolute), 4),
-                AND_ABS_X => (Op::AND(AbsoluteX), 4),
-                AND_ABS_Y => (Op::AND(AbsoluteY), 4),
-                AND_X_IND => (Op::AND(XIndirect), 6),
-                AND_IND_Y => (Op::AND(IndirectY), 5),
-                ASL_ACC => (Op::ASL(Accumulator), 2),
-                ASL_ZPG => (Op::ASL(Zeropage), 5),
-                ASL_ZPG_X => (Op::ASL(ZeropageX), 6),
-                ASL_ABS => (Op::ASL(Absolute), 6),
-                ASL_ABS_X => (Op::ASL(AbsoluteX), 7),
+                AND::IMM => (Op::AND(Immediate), 2),
+                AND::ZPG => (Op::AND(Zeropage), 3),
+                AND::ZPG_X => (Op::AND(ZeropageX), 4),
+                AND::ABS => (Op::AND(Absolute), 4),
+                AND::ABS_X => (Op::AND(AbsoluteX), 4),
+                AND::ABS_Y => (Op::AND(AbsoluteY), 4),
+                AND::X_IND => (Op::AND(XIndirect), 6),
+                AND::IND_Y => (Op::AND(IndirectY), 5),
+                ASL::ACC => (Op::ASL(Accumulator), 2),
+                ASL::ZPG => (Op::ASL(Zeropage), 5),
+                ASL::ZPG_X => (Op::ASL(ZeropageX), 6),
+                ASL::ABS => (Op::ASL(Absolute), 6),
+                ASL::ABS_X => (Op::ASL(AbsoluteX), 7),
                 BNE => (Op::BNE(Implied), 2),
-                CMP_IMM => (Op::CMP(Immediate), 2),
-                CMP_ZPG => (Op::CMP(Zeropage), 3),
-                CMP_ZPG_X => (Op::CMP(ZeropageX), 4),
-                CMP_ABS => (Op::CMP(Absolute), 4),
-                CMP_ABS_X => (Op::CMP(AbsoluteX), 4),
-                CMP_ABS_Y => (Op::CMP(AbsoluteY), 4),
-                CMP_X_IND => (Op::CMP(XIndirect), 6),
-                CMP_IND_Y => (Op::CMP(IndirectY), 5),
-                LDA_IMM => (Op::LDA(Immediate), 2),
-                LDA_ZPG => (Op::LDA(Zeropage), 3),
+                CMP::IMM => (Op::CMP(Immediate), 2),
+                CMP::ZPG => (Op::CMP(Zeropage), 3),
+                CMP::ZPG_X => (Op::CMP(ZeropageX), 4),
+                CMP::ABS => (Op::CMP(Absolute), 4),
+                CMP::ABS_X => (Op::CMP(AbsoluteX), 4),
+                CMP::ABS_Y => (Op::CMP(AbsoluteY), 4),
+                CMP::X_IND => (Op::CMP(XIndirect), 6),
+                CMP::IND_Y => (Op::CMP(IndirectY), 5),
+                LDA::IMM => (Op::LDA(Immediate), 2),
+                LDA::ZPG => (Op::LDA(Zeropage), 3),
                 PHA => (Op::PHA(Implied), 3),
                 PLA => (Op::PLA(Implied), 4),
-                STA_ZPG => (Op::STA(Zeropage), 3),
+                STA::ZPG => (Op::STA(Zeropage), 3),
                 CLC => (Op::CLC(Implied), 2),
                 SEC => (Op::SEC(Implied), 2),
                 code => panic!("Opcode {code:#04x} currently not supported"),
@@ -377,14 +316,14 @@ impl Mos6502 {
                         }
 
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         } else {
-                            self.sr &= !SR_Z;
+                            self.sr &= !SR::Z;
                         }
                     }
                     Op::AND(addr_mode) => {
@@ -399,34 +338,34 @@ impl Mos6502 {
                         }
 
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         } else {
-                            self.sr &= !SR_Z;
+                            self.sr &= !SR::Z;
                         }
                     }
                     Op::ASL(addr_mode) => match addr_mode {
                         AddrMode::Accumulator => {
                             match self.ra >> 7 == 1 {
-                                true => self.sr |= SR_C,
-                                false => self.sr &= !SR_C,
+                                true => self.sr |= SR::C,
+                                false => self.sr &= !SR::C,
                             }
 
                             self.ra = self.ra << 1;
 
                             if self.ra & SIGN > 0 {
-                                self.sr |= SR_N;
+                                self.sr |= SR::N;
                             } else {
-                                self.sr &= !SR_N;
+                                self.sr &= !SR::N;
                             }
                             if self.ra == 0 {
-                                self.sr |= SR_Z;
+                                self.sr |= SR::Z;
                             } else {
-                                self.sr &= !SR_Z;
+                                self.sr &= !SR::Z;
                             }
                         }
                         addr_mode => {
@@ -434,22 +373,22 @@ impl Mos6502 {
                             let operand = self.mem[addr as usize];
 
                             match operand >> 7 == 1 {
-                                true => self.sr |= SR_C,
-                                false => self.sr &= !SR_C,
+                                true => self.sr |= SR::C,
+                                false => self.sr &= !SR::C,
                             }
 
                             self.mem[addr as usize] = operand << 1;
                             let operand = self.mem[addr as usize];
 
                             if operand & SIGN > 0 {
-                                self.sr |= SR_N;
+                                self.sr |= SR::N;
                             } else {
-                                self.sr &= !SR_N;
+                                self.sr &= !SR::N;
                             }
                             if operand == 0 {
-                                self.sr |= SR_Z;
+                                self.sr |= SR::Z;
                             } else {
-                                self.sr &= !SR_Z;
+                                self.sr &= !SR::Z;
                             }
                         }
                     },
@@ -457,11 +396,11 @@ impl Mos6502 {
                         let operand = (!self.get_operand(addr_mode)).wrapping_add(1);
                         let res = match self.ra.checked_add(operand) {
                             Some(val) => {
-                                self.sr &= !SR_C;
+                                self.sr &= !SR::C;
                                 val
                             }
                             None => {
-                                self.sr |= SR_C;
+                                self.sr |= SR::C;
                                 self.ra.wrapping_add(operand)
                             }
                         };
@@ -473,14 +412,14 @@ impl Mos6502 {
                             }
                         }
                         if res & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if res == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         } else {
-                            self.sr &= !SR_Z;
+                            self.sr &= !SR::Z;
                         }
                     }
                     Op::LDA(addr_mode) => {
@@ -494,14 +433,14 @@ impl Mos6502 {
                             }
                         }
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         } else {
-                            self.sr &= !SR_Z;
+                            self.sr &= !SR::Z;
                         }
                     }
                     // TODO: Tests
@@ -517,14 +456,14 @@ impl Mos6502 {
                         self.current_instruction = None;
 
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         } else {
-                            self.sr &= !SR_Z;
+                            self.sr &= !SR::Z;
                         }
                     }
                     // TODO: Tests
@@ -538,12 +477,12 @@ impl Mos6502 {
                             _ => todo!("handling of STA for {:?}", addr_mode),
                         }
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         }
                     }
                     // TODO: Tests
@@ -559,24 +498,24 @@ impl Mos6502 {
                         }
 
                         if self.ra & SIGN > 0 {
-                            self.sr |= SR_N;
+                            self.sr |= SR::N;
                         } else {
-                            self.sr &= !SR_N;
+                            self.sr &= !SR::N;
                         }
                         if self.ra == 0 {
-                            self.sr |= SR_Z;
+                            self.sr |= SR::Z;
                         }
                     }
                     Op::CLC(_) => {
-                        self.sr &= !SR_C;
+                        self.sr &= !SR::C;
                         self.current_instruction = None;
                     }
                     Op::SEC(_) => {
-                        self.sr |= SR_C;
+                        self.sr |= SR::C;
                         self.current_instruction = None;
                     }
-                    Op::BNE(_) => match self.sr & SR_Z {
-                        SR_Z => {
+                    Op::BNE(_) => match self.sr & SR::Z {
+                        SR::Z => {
                             self.pc += 1;
                             self.current_instruction = None;
                         }
@@ -738,59 +677,59 @@ mod test {
 
     #[test]
     fn asl_abs_x() {
-        let mut cpu = program![ASL_ABS_X, 0xff, 0x00];
+        let mut cpu = program![ASL::ABS_X, 0xff, 0x00];
         cpu.mem[0x0101] = 0b10010101;
         cpu.rx = 0x02;
         for _ in 0..7 {
             cpu.cycle();
         }
         assert_eq!(cpu.mem[0x0101], 0b00101010, "wrong value in mem");
-        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+        assert_eq!(cpu.sr, SR::C, "wrong SR flags");
     }
 
     #[test]
     fn asl_abs() {
-        let mut cpu = program![ASL_ABS, 0x1f, 0x40];
+        let mut cpu = program![ASL::ABS, 0x1f, 0x40];
         cpu.mem[0x401f] = 0b10010101;
         for _ in 0..6 {
             cpu.cycle();
         }
         assert_eq!(cpu.mem[0x401f], 0b00101010, "wrong value in mem");
-        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+        assert_eq!(cpu.sr, SR::C, "wrong SR flags");
     }
 
     #[test]
     fn asl_zpg_x() {
-        let mut cpu = program![ASL_ZPG_X, 0xff];
+        let mut cpu = program![ASL::ZPG_X, 0xff];
         cpu.mem[0x01] = 0b10010101;
         cpu.rx = 0x02;
         for _ in 0..6 {
             cpu.cycle();
         }
         assert_eq!(cpu.mem[0x01], 0b00101010, "wrong value in mem");
-        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+        assert_eq!(cpu.sr, SR::C, "wrong SR flags");
     }
 
     #[test]
     fn asl_zpg() {
-        let mut cpu = program![ASL_ZPG, 0x00];
+        let mut cpu = program![ASL::ZPG, 0x00];
         cpu.mem[0] = 0b10010101;
         for _ in 0..5 {
             cpu.cycle();
         }
         assert_eq!(cpu.mem[0], 0b00101010, "wrong value in mem");
-        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
+        assert_eq!(cpu.sr, SR::C, "wrong SR flags");
     }
 
     #[test]
     fn asl_acc() {
-        let mut cpu = program![LDA_IMM, 0b10010101, ASL_ACC];
+        let mut cpu = program![LDA::IMM, 0b10010101, ASL::ACC];
         for _ in 0..4 {
             cpu.cycle();
         }
         assert_eq!(cpu.ra, 0b00101010, "wrong value in acc");
-        assert_eq!(cpu.sr, SR_C, "wrong SR flags");
-        let mut cpu = program![LDA_IMM, 0b00010101, ASL_ACC];
+        assert_eq!(cpu.sr, SR::C, "wrong SR flags");
+        let mut cpu = program![LDA::IMM, 0b00010101, ASL::ACC];
         for _ in 0..4 {
             cpu.cycle();
         }
@@ -800,7 +739,7 @@ mod test {
 
     #[test]
     fn bne_dont() {
-        let mut cpu = program![LDA_IMM, 5, CMP_IMM, 5, BNE, 0x10, LDA_IMM, 0x42];
+        let mut cpu = program![LDA::IMM, 5, CMP::IMM, 5, BNE, 0x10, LDA::IMM, 0x42];
         for _ in 0..8 {
             cpu.cycle();
             println!("{cpu}");
@@ -810,8 +749,8 @@ mod test {
 
     #[test]
     fn bne_do() {
-        let mut cpu = program![LDA_IMM, 5, CMP_IMM, 23, BNE, 0x10];
-        cpu.mem[0x4034] = LDA_IMM;
+        let mut cpu = program![LDA::IMM, 5, CMP::IMM, 23, BNE, 0x10];
+        cpu.mem[0x4034] = LDA::IMM;
         cpu.mem[0x4035] = 0x42;
         for _ in 0..9 {
             cpu.cycle();
@@ -822,45 +761,56 @@ mod test {
 
     #[test]
     fn cmp_imm_lt() {
-        let mut cpu = program![CMP_IMM, 5];
+        let mut cpu = program![CMP::IMM, 5];
         cpu.ra = 6;
         for _ in 0..2 {
             cpu.cycle();
             println!("{}", cpu)
         }
-        assert_eq!(cpu.sr, SR_C);
+        assert_eq!(cpu.sr, SR::C);
         assert_eq!(cpu.ra, 6); // ACC should not change
     }
 
     #[test]
     fn cmp_imm_gt() {
-        let mut cpu = program![CMP_IMM, 5];
+        let mut cpu = program![CMP::IMM, 5];
         cpu.ra = 4;
         for _ in 0..2 {
             cpu.cycle();
             println!("{}", cpu)
         }
-        assert_eq!(cpu.sr, SR_N);
+        assert_eq!(cpu.sr, SR::N);
         assert_eq!(cpu.ra, 4); // ACC should not change
     }
 
     #[test]
     fn cmp_imm_eq() {
-        let mut cpu = program![CMP_IMM, 5];
+        let mut cpu = program![CMP::IMM, 5];
         cpu.ra = 5;
         for _ in 0..2 {
             cpu.cycle();
             println!("{}", cpu)
         }
-        assert_eq!(cpu.sr, SR_Z | SR_C);
+        assert_eq!(cpu.sr, SR::Z | SR::C);
         assert_eq!(cpu.ra, 5); // ACC should not change
     }
 
     #[test]
     fn add_16bit() {
         let mut cpu = program![
-            CLC, ADC_IMM, 0xff, ADC_IMM, 0x02, STA_ZPG, 0x00, LDA_IMM, 0x00, ADC_IMM, 0x7f,
-            STA_ZPG, 0x01
+            CLC,
+            ADC::IMM,
+            0xff,
+            ADC::IMM,
+            0x02,
+            STA::ZPG,
+            0x00,
+            LDA::IMM,
+            0x00,
+            ADC::IMM,
+            0x7f,
+            STA::ZPG,
+            0x01
         ];
         for _ in 0..16 {
             cpu.cycle();
@@ -871,7 +821,7 @@ mod test {
 
     #[test]
     fn and_zpg() {
-        let mut cpu = program![ADC_IMM, 0b01101100, AND_ZPG, 0x42];
+        let mut cpu = program![ADC::IMM, 0b01101100, AND::ZPG, 0x42];
         cpu.mem[0x0042] = 0b10101110;
         for _ in 0..5 {
             cpu.cycle();
@@ -883,20 +833,20 @@ mod test {
 
     #[test]
     fn and_zpg_srz() {
-        let mut cpu = program![ADC_ZPG, 0x02, AND_ZPG, 0x00];
+        let mut cpu = program![ADC::ZPG, 0x02, AND::ZPG, 0x00];
         cpu.mem[0x0000] = 0x01;
         for _ in 0..5 {
             cpu.cycle()
         }
 
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
-        assert_eq!(cpu.sr, SR_Z);
+        assert_eq!(cpu.sr, SR::Z);
     }
 
     // Alex suggested these test numbers
     #[test]
     fn adc_imm_alex() {
-        let mut cpu = program![ADC_IMM, 0x06, AND_IMM, 84];
+        let mut cpu = program![ADC::IMM, 0x06, AND::IMM, 84];
         for _ in 0..4 {
             cpu.cycle()
         }
@@ -905,7 +855,7 @@ mod test {
 
     #[test]
     fn and_imm() {
-        let mut cpu = program![ADC_IMM, 0x01, AND_IMM, 0x02];
+        let mut cpu = program![ADC::IMM, 0x01, AND::IMM, 0x02];
 
         for _ in 0..2 {
             cpu.cycle()
@@ -920,7 +870,7 @@ mod test {
 
     #[test]
     fn adc_imm() {
-        let mut cpu = program![ADC_IMM, 0x01];
+        let mut cpu = program![ADC::IMM, 0x01];
         for _ in 0..2 {
             cpu.cycle()
         }
@@ -930,7 +880,7 @@ mod test {
 
     #[test]
     fn adc_imm_twice() {
-        let mut cpu = program![ADC_IMM, 0x01, ADC_IMM, 0x01];
+        let mut cpu = program![ADC::IMM, 0x01, ADC::IMM, 0x01];
         for _ in 0..4 {
             cpu.cycle()
         }
@@ -940,7 +890,7 @@ mod test {
 
     #[test]
     fn adc_im_carry() {
-        let mut cpu = program![ADC_IMM, 0x90];
+        let mut cpu = program![ADC::IMM, 0x90];
         //Initialise accumulator
         cpu.ra = 0x80;
 
@@ -950,7 +900,7 @@ mod test {
 
         assert_eq!(cpu.ra, 0x10);
         println!("Status register: {:#010b}", cpu.sr);
-        assert_eq!(cpu.sr, SR_C | SR_V);
+        assert_eq!(cpu.sr, SR::C | SR::V);
     }
 
     #[test]
@@ -978,7 +928,7 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0xee);
-        assert_eq!(cpu.sr, SR_N | SR_C);
+        assert_eq!(cpu.sr, SR::N | SR::C);
 
         cpu.mem[0x4022] = 0x07;
         cpu.reset();
@@ -988,7 +938,7 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0x7a);
-        assert_eq!(cpu.sr, SR_V | SR_C);
+        assert_eq!(cpu.sr, SR::V | SR::C);
 
         cpu.reset();
         cpu.ra = 0x7;
@@ -998,7 +948,7 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0x5);
-        assert_eq!(cpu.sr, SR_C);
+        assert_eq!(cpu.sr, SR::C);
 
         cpu.reset();
         cpu.ra = 0x7;
@@ -1028,7 +978,7 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0x80);
-        assert_eq!(cpu.sr, SR_N | SR_V);
+        assert_eq!(cpu.sr, SR::N | SR::V);
 
         cpu.reset();
         cpu.ra = 0x10;
@@ -1050,12 +1000,12 @@ mod test {
             println!("{cpu}");
         }
         assert_eq!(cpu.ra, 0xfe);
-        assert_eq!(cpu.sr, SR_N);
+        assert_eq!(cpu.sr, SR::N);
     }
 
     #[test]
     fn adc_zpg() {
-        let mut cpu = program![ADC_ZPG, 0x01];
+        let mut cpu = program![ADC::ZPG, 0x01];
         cpu.mem[0x0001] = 0x42;
         for _ in 0..3 {
             cpu.cycle()
@@ -1066,19 +1016,19 @@ mod test {
 
     #[test]
     fn adc_zpg_srz() {
-        let mut cpu = program![ADC_ZPG, 0x00];
+        let mut cpu = program![ADC::ZPG, 0x00];
         cpu.mem[0x0000] = 0x00;
         for _ in 0..3 {
             cpu.cycle()
         }
 
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
-        assert_eq!(cpu.sr, SR_Z);
+        assert_eq!(cpu.sr, SR::Z);
     }
 
     #[test]
     fn adc_zpg_twice() {
-        let mut cpu = program![ADC_ZPG, 0x01, ADC_ZPG, 0x02];
+        let mut cpu = program![ADC::ZPG, 0x01, ADC::ZPG, 0x02];
         cpu.mem[0x0001] = 0x42;
         cpu.mem[0x0002] = 0x02;
         for _ in 0..6 {
@@ -1090,7 +1040,7 @@ mod test {
 
     #[test]
     fn adc_zpg_x() {
-        let mut cpu = program![ADC_ZPG_X, 0x01];
+        let mut cpu = program![ADC::ZPG_X, 0x01];
         cpu.mem[0x0006] = 0x42;
         cpu.rx = 0x05;
 
@@ -1103,7 +1053,7 @@ mod test {
 
     #[test]
     fn adc_abs() {
-        let mut cpu = program![ADC_ABS, 0x06, 0x01];
+        let mut cpu = program![ADC::ABS, 0x06, 0x01];
         cpu.mem[0x0106] = 0x42;
         for _ in 0..4 {
             dbg!(&cpu);
@@ -1121,9 +1071,9 @@ mod test {
         rom[0xfffc] = 0x20;
         rom[0xfffd] = 0x40;
 
-        rom[0x4020] = ADC_IMM;
+        rom[0x4020] = ADC::IMM;
         rom[0x4021] = 0x07; // 7
-        rom[0x4022] = ADC_IMM;
+        rom[0x4022] = ADC::IMM;
         rom[0x4023] = 0xfe; // -2
 
         let mut cpu = Mos6502::new(rom);
@@ -1134,7 +1084,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x05);
-        assert_eq!(cpu.sr, SR_C);
+        assert_eq!(cpu.sr, SR::C);
 
         cpu.mem[0x4023] = 0x02; // 7 + 2
         cpu.reset();
@@ -1152,7 +1102,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x87);
-        assert_eq!(cpu.sr, SR_N);
+        assert_eq!(cpu.sr, SR::N);
 
         cpu.mem[0x4023] = 0xf7; // 7 + -9
         cpu.reset();
@@ -1161,7 +1111,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0xfe);
-        assert_eq!(cpu.sr, SR_N);
+        assert_eq!(cpu.sr, SR::N);
 
         cpu.mem[0x4023] = 0x7a; // 7 + 122
         cpu.reset();
@@ -1170,7 +1120,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x81);
-        assert_eq!(cpu.sr, SR_N | SR_V);
+        assert_eq!(cpu.sr, SR::N | SR::V);
 
         cpu.mem[0x4021] = 0x80; // 128
         cpu.mem[0x4023] = 0x90; // -16
@@ -1180,7 +1130,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x10);
-        assert_eq!(cpu.sr, SR_V | SR_C);
+        assert_eq!(cpu.sr, SR::V | SR::C);
 
         cpu.mem[0x4021] = 0xf0; // -16
         cpu.mem[0x4023] = 0xf0; // -16
@@ -1190,7 +1140,7 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0xe0); // -32
-        assert_eq!(cpu.sr, SR_N | SR_C);
+        assert_eq!(cpu.sr, SR::N | SR::C);
 
         cpu.mem[0x4021] = 0xf8; // -8
         cpu.mem[0x4023] = 0x0a; // 10
@@ -1200,12 +1150,12 @@ mod test {
         }
         println!("STATUS: {:#010b} | RA: {:#04x}", cpu.sr, cpu.ra);
         assert_eq!(cpu.ra, 0x02);
-        assert_eq!(cpu.sr, SR_C);
+        assert_eq!(cpu.sr, SR::C);
     }
 
     #[test]
     fn adc_abs_x() {
-        let mut cpu = program![ADC_ABS_X, 0x10, 0x01];
+        let mut cpu = program![ADC::ABS_X, 0x10, 0x01];
         cpu.mem[0x0200] = 0x42;
         cpu.rx = 0xf0;
 
@@ -1220,7 +1170,7 @@ mod test {
 
     #[test]
     fn adc_abs_x_nocross() {
-        let mut cpu = program![ADC_ABS_X, 0x10, 0x01];
+        let mut cpu = program![ADC::ABS_X, 0x10, 0x01];
         cpu.mem[0x0111] = 0x42;
         cpu.rx = 0x01;
 
@@ -1238,7 +1188,7 @@ mod test {
     fn adc_abs_x_cycle() {
         // This should take 5 cycles as the RX offset is enough to cross the
         // page boundary
-        let mut cpu = program![ADC_ABS_X, 0x10, 0x01, ADC_IMM, 0x01];
+        let mut cpu = program![ADC::ABS_X, 0x10, 0x01, ADC::IMM, 0x01];
         cpu.mem[0x0200] = 0x01;
         cpu.rx = 0xf0;
 
@@ -1254,7 +1204,7 @@ mod test {
 
     #[test]
     fn adc_abs_y_nocross() {
-        let mut cpu = program![ADC_ABS_Y, 0x10, 0x01];
+        let mut cpu = program![ADC::ABS_Y, 0x10, 0x01];
         cpu.mem[0x0111] = 0x42;
         cpu.ry = 0x01;
 
@@ -1272,7 +1222,7 @@ mod test {
     fn adc_abs_y_cycle() {
         // This should take 5 cycles as the RX offset is enough to cross the
         // page boundary
-        let mut cpu = program![ADC_ABS_Y, 0x10, 0x01, ADC_IMM, 0x01];
+        let mut cpu = program![ADC::ABS_Y, 0x10, 0x01, ADC::IMM, 0x01];
         cpu.mem[0x200] = 0x01;
         cpu.ry = 0xf0;
 
@@ -1288,7 +1238,7 @@ mod test {
 
     #[test]
     fn adc_x_indirect() {
-        let mut cpu = program![ADC_X_IND, 0x20];
+        let mut cpu = program![ADC::X_IND, 0x20];
         cpu.mem[0x0024] = 0x74;
         cpu.mem[0x0025] = 0x20;
         cpu.mem[0x2074] = 0x42;
@@ -1303,7 +1253,7 @@ mod test {
 
     #[test]
     fn adc_indirect_y() {
-        let mut cpu = program![ADC_IND_Y, 0x86];
+        let mut cpu = program![ADC::IND_Y, 0x86];
         cpu.mem[0x0086] = 0x28;
         cpu.mem[0x0087] = 0x40;
         cpu.mem[0x4038] = 0x42;
